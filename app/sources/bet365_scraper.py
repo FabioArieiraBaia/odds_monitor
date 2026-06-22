@@ -450,11 +450,10 @@ class Bet365Scraper(BaseSource):
             elif len(scores) >= 2:
                 game_score = f"{scores[0]}:{scores[1]}"
         elif sport in ("basketball", "soccer", "icehockey", "handball", "futsal"):
-            # Team sports: [score_home, score_away] + optional period
+            # Team sports: [score_home, score_away]
+            # Ignore period/quarter to avoid displaying "23 (23:51)" instead of "0:0 (23:51)"
             if len(scores) >= 2:
                 game_score = f"{scores[0]}:{scores[1]}"
-                if len(scores) >= 3:
-                    set_score = scores[2]  # Period/Quarter info
         elif sport in ("tabletennis", "badminton", "volleyball", "beach_volley"):
             # Set-based sports: [sets_p1, sets_p2, current_set_score_p1, current_set_score_p2]
             if len(scores) >= 4:
