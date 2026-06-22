@@ -24,6 +24,7 @@ const toggleLinksPanel = document.getElementById('toggle-links-panel');
 // ── Stat elements ──
 const statBet365 = document.getElementById('stat-bet365');
 const statBetburger = document.getElementById('stat-betburger');
+const statXbet = document.getElementById('stat-xbet');
 const statPaired = document.getElementById('stat-paired');
 const statAlertCount = document.getElementById('stat-alert-count');
 const statClock = document.getElementById('stat-clock');
@@ -261,6 +262,7 @@ function updateStats(stats) {
 
     animateValue(statBet365, stats.bet365_count || 0);
     animateValue(statBetburger, stats.betburger_count || 0);
+    animateValue(statXbet, stats.xbet_count || 0);
     animateValue(statPaired, pairedCount);
     animateValue(statAlertCount, alertHistory.length);
     statClock.textContent = stats.timestamp || '--:--';

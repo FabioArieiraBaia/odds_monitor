@@ -49,7 +49,7 @@ betburger_scraper = BetBurgerScraper(
 )
 
 xbet_scraper = Bet1xScraper(
-    headless=True,
+    headless=settings.BET365_HEADLESS,
     sports=settings.BET365_SPORTS
 )
 
@@ -187,6 +187,7 @@ async def poller_loop():
                 "stats": {
                     "bet365_count": len(b365_events),
                     "betburger_count": len(burger_events),
+                    "xbet_count": len(xbet_events),
                     "total_monitored": len(match_ids),
                     "timestamp": datetime.now().strftime("%H:%M:%S"),
                 }
