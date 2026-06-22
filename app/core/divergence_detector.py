@@ -19,40 +19,65 @@ class DivergenceDetector:
         self._alerts_cooldown: Dict[str, datetime] = {}  # { match_id: last_alert_time }
         self._alerted_hashes = set()
 
+    def _safe_int(self, val: str) -> int:
+        """Safely parse a string to int, returning 0 on failure."""
+        try:
+            return int(val.strip())
+        except (ValueError, AttributeError):
+            return 0
+
+    def _parse_score_pair(self, score: str) -> tuple:
+        """Parse 'H:A' into (home, away) ints. Returns (0,0) on failure."""
+        try:
+            parts = score.split(":")
+            if len(parts) >= 2:
+                return self._safe_int(parts[0]), self._safe_int(parts[1])
+        except Exception:
+            pass
+        return 0, 0
+
     def _is_burger_ahead(self, b365_sets: str, b365_score: str, burger_sets: str, burger_score: str) -> bool:
         """Checks if BetBurger is strictly ahead of Bet365 (sets or game score)."""
         try:
-            # 1. Compare sets if they are in "Home:Away" format (tennis, table tennis, etc.)
-            b365_completed = 0
-            burger_completed = 0
+            # 1. Compare total completed sets
+            b365_s_h, b365_s_a = self._parse_score_pair(b365_sets)
+            burger_s_h, burger_s_a = self._parse_score_pair(burger_sets)
             
-            if ":" in b365_sets:
-                b365_completed = sum(map(int, b365_sets.split(":")))
-            if ":" in burger_sets:
-                burger_completed = sum(map(int, burger_sets.split(":")))
-                
-            if burger_completed > b365_completed:
+            b365_total_sets = b365_s_h + b365_s_a
+            burger_total_sets = burger_s_h + burger_s_a
+            
+            if burger_total_sets > b365_total_sets:
                 return True
-            if burger_completed < b365_completed:
+            if burger_total_sets < b365_total_sets:
                 return False
                 
-            # 2. If same set, compare game scores
-            b365_pts = list(map(int, b365_score.split(":")))
-            burger_pts = list(map(int, burger_score.split(":")))
+            # 2. If same set count, compare game/point scores
+            b365_g_h, b365_g_a = self._parse_score_pair(b365_score)
+            burger_g_h, burger_g_a = self._parse_score_pair(burger_score)
             
-            return (burger_pts[0] > b365_pts[0]) or (burger_pts[1] > b365_pts[1])
+            # BetBurger total must be higher (more action has happened)
+            burger_total = burger_g_h + burger_g_a
+            b365_total = b365_g_h + b365_g_a
+            
+            return burger_total > b365_total
         except Exception:
             return False
 
-    def _parse_game_diff(self, score_a: str, score_b: str) -> int:
-        """Helper to get difference in total games in the current set."""
+    def _parse_game_diff(self, b365_sets: str, b365_score: str, burger_sets: str, burger_score: str) -> int:
+        """Calculate overall divergence magnitude between the two sources."""
         try:
-            pts_a = list(map(int, score_a.split(":")))
-            pts_b = list(map(int, score_b.split(":")))
+            # Set difference
+            b365_s_h, b365_s_a = self._parse_score_pair(b365_sets)
+            burger_s_h, burger_s_a = self._parse_score_pair(burger_sets)
+            set_diff = abs((burger_s_h + burger_s_a) - (b365_s_h + b365_s_a))
             
-            diff_h = abs(pts_a[0] - pts_b[0])
-            diff_a = abs(pts_a[1] - pts_b[1])
-            return max(diff_h, diff_a)
+            # Game/score difference
+            b365_g_h, b365_g_a = self._parse_score_pair(b365_score)
+            burger_g_h, burger_g_a = self._parse_score_pair(burger_score)
+            score_diff = abs((burger_g_h + burger_g_a) - (b365_g_h + b365_g_a))
+            
+            # Sets are worth more — each set is at least ~10 games
+            return set_diff * 10 + score_diff
         except Exception:
             return 0
 
@@ -96,12 +121,15 @@ class DivergenceDetector:
                     self._alerted_hashes.add(alert_id)
                     continue # Skip other alerts for this match
 
-            # Compare Game Scores: BetBurger must be strictly ahead
+            # Compare scores: BetBurger must be strictly ahead
             burger_ahead = self._is_burger_ahead(
                 b365_event.set_score, b365_event.game_score,
                 burger_event.set_score, burger_event.game_score
             )
-            game_diff = self._parse_game_diff(b365_event.game_score, burger_event.game_score)
+            game_diff = self._parse_game_diff(
+                b365_event.set_score, b365_event.game_score,
+                burger_event.set_score, burger_event.game_score
+            )
             
             # Check freeze duration on Bet365
             b365_last_changed = self.state_cache.get_last_changed(match_id, "bet365")

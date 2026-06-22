@@ -230,20 +230,18 @@ class Bet365Scraper(BaseSource):
     async def _extract_events_from_page(self, sport: str) -> List[NormalizedEvent]:
         """
         Extract live events from the current Bet365 in-play page.
-        Uses multiple extraction strategies for robustness.
+        Uses a structure-aware JavaScript extractor that reads scores
+        per participant row to avoid flat-array ambiguity.
         """
         events = []
         now = datetime.now()
         
         try:
-            # Strategy: Use JavaScript evaluation to extract structured data
-            # Bet365's in-play page renders fixtures with identifiable patterns
             raw_data = await self.page.evaluate("""
                 () => {
                     const results = [];
                     
-                    // Strategy 1: Look for fixture containers by common patterns
-                    // Bet365 uses class prefixes like 'ovm-', 'rcl-', 'sgl-', 'ipe-'
+                    // ── Find visible fixture containers ──
                     const selectors = [
                         '.ovm-Fixture',
                         '.ipe-EventViewDetail',
@@ -255,28 +253,31 @@ class Bet365Scraper(BaseSource):
                     let fixtures = [];
                     for (const sel of selectors) {
                         const els = Array.from(document.querySelectorAll(sel));
-                        const visibleEls = els.filter(el => el.offsetParent !== null);
-                        if (visibleEls.length > 0) {
-                            fixtures = visibleEls;
+                        const visible = els.filter(el => {
+                            if (el.offsetParent === null) return false;
+                            const rect = el.getBoundingClientRect();
+                            return rect.width > 0 && rect.height > 0;
+                        });
+                        if (visible.length > 0) {
+                            fixtures = visible;
                             break;
                         }
                     }
                     
                     if (fixtures.length === 0) {
-                        // Strategy 2: Find fixtures by structure
-                        // Look for elements containing team names followed by scores
                         const allElements = document.querySelectorAll('[class*="Participant"], [class*="Team"]');
-                        // Group by parent
                         const parents = new Set();
                         allElements.forEach(el => {
-                            if (el.parentElement && el.parentElement.offsetParent !== null) parents.add(el.parentElement);
+                            if (el.parentElement && el.parentElement.offsetParent !== null) {
+                                parents.add(el.parentElement);
+                            }
                         });
                         fixtures = Array.from(parents);
                     }
                     
                     for (const fixture of fixtures) {
                         try {
-                            // Extract team/player names
+                            // ── Extract participant names ──
                             const nameSelectors = [
                                 '.ovm-FixtureName_Name',
                                 '[class*="ParticipantName"]',
@@ -284,70 +285,93 @@ class Bet365Scraper(BaseSource):
                                 '[class*="Fixture"] [class*="Name"]',
                             ];
                             
-                            let matchName = '';
+                            let names = [];
                             for (const nSel of nameSelectors) {
                                 const nameEls = fixture.querySelectorAll(nSel);
                                 if (nameEls.length >= 2) {
-                                    matchName = Array.from(nameEls).map(e => e.textContent.trim()).join(' vs ');
-                                    break;
-                                } else if (nameEls.length === 1) {
-                                    matchName = nameEls[0].textContent.trim();
+                                    names = Array.from(nameEls).map(e => e.textContent.trim());
                                     break;
                                 }
                             }
                             
-                            if (!matchName) {
-                                // Try to get all text content and parse
-                                const text = fixture.textContent.trim();
-                                if (text.length < 5 || text.length > 200) continue;
-                                matchName = text.split('\\n')[0].trim();
-                            }
+                            if (names.length < 2) continue;
+                            const matchName = names.join(' vs ');
+                            if (matchName.length < 3) continue;
                             
-                            if (!matchName || matchName.length < 3) continue;
+                            // ── Extract scores PER PARTICIPANT ROW ──
+                            // Bet365 renders scores in participant rows. Each row has
+                            // the participant name followed by score cells.
+                            // We extract all numeric leaf-text from each row separately.
                             
-                            // Extract scores
-                            const scoreSelectors = [
-                                '[class*="Score"]',
-                                '[class*="score"]',
-                                '.ovm-ScoreWrapper_Score',
+                            const participantSelectors = [
+                                '[class*="Participant"]',   // Common wrapper
+                                '.ovm-ParticipantOddsOnly', // Odds-only view
+                                '[class*="ScoreCouponRow"]', // Score row
+                                '.ovm-FixtureDetailParticipant', // Detail view
                             ];
                             
-                            let scores = [];
-                            function getLeafText(node) {
-                                let t = [];
-                                if (node.nodeType === Node.TEXT_NODE) {
-                                    if (node.textContent.trim()) t.push(node.textContent.trim());
-                                } else {
-                                    for (let child of node.childNodes) t = t.concat(getLeafText(child));
-                                }
-                                return t;
+                            let p1Scores = [];
+                            let p2Scores = [];
+                            
+                            // Strategy A: find participant rows and extract scores from each
+                            let participantRows = [];
+                            for (const pSel of participantSelectors) {
+                                participantRows = Array.from(fixture.querySelectorAll(pSel));
+                                if (participantRows.length >= 2) break;
                             }
                             
-                            for (const sSel of scoreSelectors) {
-                                const scoreEls = fixture.querySelectorAll(sSel);
+                            function extractNums(el) {
+                                const nums = [];
+                                // Get all score-like elements within this row
+                                const scoreEls = el.querySelectorAll(
+                                    '[class*="Score"], [class*="score"], .ovm-ScoreWrapper_Score'
+                                );
                                 if (scoreEls.length > 0) {
-                                    let allScores = [];
-                                    for (const el of scoreEls) {
-                                        allScores = allScores.concat(getLeafText(el));
+                                    for (const sEl of scoreEls) {
+                                        const t = sEl.textContent.trim();
+                                        if (/^\d+$/.test(t) || /^[Aa]d?v?$/.test(t)) {
+                                            nums.push(t);
+                                        }
                                     }
-                                    if (allScores.length > 0) {
-                                        scores = allScores;
-                                        break;
+                                }
+                                // Fallback: walk leaf nodes
+                                if (nums.length === 0) {
+                                    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+                                    let node;
+                                    while (node = walker.nextNode()) {
+                                        const t = node.textContent.trim();
+                                        if (/^\d+$/.test(t)) nums.push(t);
+                                    }
+                                }
+                                return nums;
+                            }
+                            
+                            if (participantRows.length >= 2) {
+                                p1Scores = extractNums(participantRows[0]);
+                                p2Scores = extractNums(participantRows[1]);
+                            }
+                            
+                            // Strategy B fallback: flat score extraction
+                            let flatScores = [];
+                            if (p1Scores.length === 0 && p2Scores.length === 0) {
+                                const scoreEls = fixture.querySelectorAll(
+                                    '[class*="Score"], [class*="score"], .ovm-ScoreWrapper_Score'
+                                );
+                                for (const el of scoreEls) {
+                                    const t = el.textContent.trim();
+                                    if (/^\d+$/.test(t) || /^[Aa]d?v?$/.test(t)) {
+                                        flatScores.push(t);
                                     }
                                 }
                             }
                             
-                            // Extract event link / event ID
+                            // ── Extract event link / event ID ──
                             let eventId = null;
                             let href = null;
                             
-                            // Look for links or clickable elements with event data
                             const linkEl = fixture.querySelector('a[href*="EV"]');
-                            if (linkEl) {
-                                href = linkEl.getAttribute('href');
-                            }
+                            if (linkEl) href = linkEl.getAttribute('href');
                             
-                            // Look for data attributes
                             const dataAttrs = ['data-fixtureid', 'data-eventid', 'data-id', 'data-ev'];
                             for (const attr of dataAttrs) {
                                 const val = fixture.getAttribute(attr) || 
@@ -358,7 +382,6 @@ class Bet365Scraper(BaseSource):
                                 }
                             }
                             
-                            // Extract from onclick or parent navigation context
                             if (!eventId && !href) {
                                 const clickable = fixture.querySelector('[onclick*="EV"], [data-nav*="EV"]');
                                 if (clickable) {
@@ -371,7 +394,9 @@ class Bet365Scraper(BaseSource):
                             
                             results.push({
                                 name: matchName,
-                                scores: scores,
+                                p1: p1Scores,
+                                p2: p2Scores,
+                                flat: flatScores,
                                 eventId: eventId,
                                 href: href,
                             });
@@ -390,17 +415,26 @@ class Bet365Scraper(BaseSource):
                     if not match_name or len(match_name) < 3:
                         continue
                     
-                    scores = item.get('scores', [])
+                    p1 = item.get('p1', [])
+                    p2 = item.get('p2', [])
+                    flat = item.get('flat', [])
                     event_id = item.get('eventId')
                     href = item.get('href')
                     
-                    # Parse scores based on sport
-                    set_score, game_score, point_score = self._parse_scores(scores, sport)
+                    # Parse scores using structured per-row data
+                    set_score, game_score, point_score = self._parse_scores_structured(
+                        p1, p2, flat, sport
+                    )
                     
-                    # Build deep link
+                    # Log raw extraction for debugging (first 3 events per sport)
+                    if len(events) < 3:
+                        logger.debug(
+                            f"[Bet365 RAW] {sport} | {match_name} | "
+                            f"P1={p1} P2={p2} flat={flat} => "
+                            f"set={set_score} game={game_score} pts={point_score}"
+                        )
+                    
                     deep_link = self._build_deep_link(event_id, href, sport)
-                    
-                    # Normalize match ID for cross-source matching
                     match_id = self._normalize_name(match_name)
                     
                     events.append(NormalizedEvent(
@@ -423,52 +457,77 @@ class Bet365Scraper(BaseSource):
         
         return events
 
-    def _parse_scores(self, scores: List[str], sport: str) -> tuple:
-        """Parse score array into (set_score, game_score, point_score) based on sport."""
+    def _parse_scores_structured(self, p1: List[str], p2: List[str], flat: List[str], sport: str) -> tuple:
+        """
+        Parse structured score data into (set_score, game_score, point_score).
+        
+        p1/p2: scores extracted from participant row 1 and row 2 respectively.
+        flat: fallback flat list if row extraction failed.
+        
+        Bet365 layout per sport:
+        - Tennis:       P1 row = [Sets, Games, Points]  P2 row = [Sets, Games, Points]
+        - Table Tennis:  P1 row = [Sets, CurrentSetScore] P2 row = [Sets, CurrentSetScore]
+        - Basketball:   P1 row = [Total] or [Q1,Q2,Q3,Q4,Total]  P2 row = same
+        - Soccer:       P1 row = [Goals]  P2 row = [Goals]
+        """
         set_score = "0:0"
         game_score = "0:0"
         point_score = "0"
         
-        if not scores:
-            return set_score, game_score, point_score
-        
-        # Clean scores — remove empty/whitespace entries and filter out team names/garbage
-        # Only keep values that are digits, tennis 'A'/'Ad', or formatted scores like '0:0'
-        valid_scores = []
-        for s in scores:
-            s = s.strip()
-            if not s: continue
-            if re.match(r'^(\d{1,3}|[Aa]|[Aa]d|[Aa]dv|\d+\s*[-:]\s*\d+)$', s):
-                valid_scores.append(s)
-        scores = valid_scores
-        
-        if sport == "tennis":
-            # Tennis: typically [sets_p1, sets_p2, games_p1, games_p2, points_p1, points_p2]
-            if len(scores) >= 6:
-                set_score = f"{scores[0]}:{scores[1]}"
-                game_score = f"{scores[2]}:{scores[3]}"
-                point_score = f"{scores[4]}:{scores[5]}"
-            elif len(scores) >= 4:
-                set_score = f"{scores[0]}:{scores[1]}"
-                game_score = f"{scores[2]}:{scores[3]}"
-            elif len(scores) >= 2:
-                game_score = f"{scores[0]}:{scores[1]}"
-        elif sport in ("basketball", "soccer", "icehockey", "handball", "futsal"):
-            # Team sports: [score_home, score_away]
-            # Ignore period/quarter to avoid displaying "23 (23:51)" instead of "0:0 (23:51)"
-            if len(scores) >= 2:
-                game_score = f"{scores[0]}:{scores[1]}"
-        elif sport in ("tabletennis", "badminton", "volleyball", "beach_volley"):
-            # Set-based sports: Bet365 DOM structure is usually row-based: [SetHome, PointHome, SetAway, PointAway]
-            if len(scores) >= 4:
-                set_score = f"{scores[0]}:{scores[2]}"
-                game_score = f"{scores[1]}:{scores[3]}"
-            elif len(scores) >= 2:
-                game_score = f"{scores[0]}:{scores[1]}"
-        else:
-            # Generic fallback
-            if len(scores) >= 2:
-                game_score = f"{scores[0]}:{scores[1]}"
+        # ── Structured extraction (per-row) ──
+        if p1 and p2:
+            # Clean to only numeric + tennis Ad
+            p1 = [s.strip() for s in p1 if re.match(r'^(\d{1,3}|[Aa]|[Aa]d|[Aa]dv)$', s.strip())]
+            p2 = [s.strip() for s in p2 if re.match(r'^(\d{1,3}|[Aa]|[Aa]d|[Aa]dv)$', s.strip())]
+            
+            if sport == "tennis":
+                # Tennis: [Sets, Games, Points] per row
+                if len(p1) >= 3 and len(p2) >= 3:
+                    set_score = f"{p1[0]}:{p2[0]}"
+                    game_score = f"{p1[1]}:{p2[1]}"
+                    point_score = f"{p1[2]}:{p2[2]}"
+                elif len(p1) >= 2 and len(p2) >= 2:
+                    set_score = f"{p1[0]}:{p2[0]}"
+                    game_score = f"{p1[1]}:{p2[1]}"
+                elif len(p1) >= 1 and len(p2) >= 1:
+                    game_score = f"{p1[0]}:{p2[0]}"
+                    
+            elif sport in ("tabletennis", "badminton", "volleyball", "beach_volley"):
+                # Set-based sports: [Sets, CurrentSetScore] per row
+                if len(p1) >= 2 and len(p2) >= 2:
+                    set_score = f"{p1[0]}:{p2[0]}"
+                    game_score = f"{p1[-1]}:{p2[-1]}"  # last number = current set score
+                elif len(p1) >= 1 and len(p2) >= 1:
+                    game_score = f"{p1[0]}:{p2[0]}"
+                    
+            elif sport in ("basketball", "icehockey", "handball"):
+                # Team sports with periods: row may have [Q1, Q2, ..., Total]
+                # The LAST number in the row is the total score
+                if len(p1) >= 1 and len(p2) >= 1:
+                    game_score = f"{p1[-1]}:{p2[-1]}"
+                    
+            elif sport in ("soccer", "futsal", "baseball", "esports"):
+                # Simple score sports: row has [Score] (just 1 number)
+                if len(p1) >= 1 and len(p2) >= 1:
+                    game_score = f"{p1[-1]}:{p2[-1]}"
+                    
+            else:
+                # Generic fallback
+                if len(p1) >= 1 and len(p2) >= 1:
+                    game_score = f"{p1[-1]}:{p2[-1]}"
+                    
+        # ── Flat fallback ──
+        elif flat:
+            flat = [s.strip() for s in flat if re.match(r'^(\d{1,3}|[Aa]|[Aa]d|[Aa]dv)$', s.strip())]
+            if sport == "tennis" and len(flat) >= 6:
+                set_score = f"{flat[0]}:{flat[1]}"
+                game_score = f"{flat[2]}:{flat[3]}"
+                point_score = f"{flat[4]}:{flat[5]}"
+            elif len(flat) >= 4:
+                set_score = f"{flat[0]}:{flat[1]}"
+                game_score = f"{flat[2]}:{flat[3]}"
+            elif len(flat) >= 2:
+                game_score = f"{flat[0]}:{flat[1]}"
         
         # Normalize dashes to colons
         set_score = set_score.replace('-', ':')
