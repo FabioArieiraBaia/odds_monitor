@@ -345,6 +345,12 @@ class Bet365Scraper(BaseSource):
                                 if (participantRows.length >= 2) break;
                             }
                             
+                            function isVisible(el) {
+                                if (el.offsetParent !== null) return true;
+                                const rect = el.getBoundingClientRect();
+                                return rect.width > 0 && rect.height > 0;
+                            }
+
                             function extractNums(el) {
                                 const nums = [];
                                 // Get all score-like elements within this row
@@ -353,6 +359,7 @@ class Bet365Scraper(BaseSource):
                                 );
                                 if (scoreEls.length > 0) {
                                     for (const sEl of scoreEls) {
+                                        if (!isVisible(sEl)) continue;
                                         const t = sEl.textContent.trim();
                                         if (/^\d+$/.test(t) || /^[Aa]d?v?$/.test(t)) {
                                             nums.push(t);
@@ -383,6 +390,7 @@ class Bet365Scraper(BaseSource):
                                     '[class*="Score"], [class*="score"], .ovm-ScoreWrapper_Score'
                                 );
                                 for (const el of scoreEls) {
+                                    if (!isVisible(el)) continue;
                                     const t = el.textContent.trim();
                                     if (/^\d+$/.test(t) || /^[Aa]d?v?$/.test(t)) {
                                         flatScores.push(t);
