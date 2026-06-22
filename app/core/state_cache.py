@@ -14,7 +14,7 @@ class StateCache:
         source = event.source
         now = datetime.now()
 
-        if source == "betburger":
+        if source in ("betburger", "1xbet"):
             best_match_id = match_id
             best_score = 0.0
             

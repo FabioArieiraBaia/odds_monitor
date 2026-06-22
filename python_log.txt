@@ -1,0 +1,102 @@
+[STDERR] C:\xampp\htdocs\odds_monitor\app\sources\bet365_scraper.py:374: SyntaxWarning: invalid escape sequence '\d'
+  .filter(t => /^\d+$/.test(t) || /^[Aa]d?v?$/.test(t));
+
+[STDERR] C:\xampp\htdocs\odds_monitor\app\sources\betburger_source.py:443: SyntaxWarning: invalid escape sequence '\d'
+  if (text.includes(' - ') && !match_name && text.length > 10 && !/^\d{2}\.\d{2}\.\d{4}/.test(text)) {
+
+[STDERR] C:\xampp\htdocs\odds_monitor\app\main.py:238: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+C:\xampp\htdocs\odds_monitor\app\main.py:245: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("shutdown")
+
+[STDERR] INFO:     Started server process [10720]
+INFO:     Waiting for application startup.
+
+[STDERR] 18:16:54 [INFO] main: \U0001f310 Web server starting...
+18:16:54 [INFO] main: \U0001f310 Web server starting...
+
+[STDERR] 18:16:54 [INFO] main: ============================================================
+18:16:54 [INFO] main: \U0001f680 Odds Divergence Detector STARTED � REAL MODE
+18:16:54 [INFO] main:    Bet365 sports: ['tennis', 'basketball', 'tabletennis', 'volleyball', 'badminton', 'icehockey', 'soccer']
+18:16:54 [INFO] main:    BetBurger login: NOT configured
+18:16:54 [INFO] main:    Freeze threshold: 45.0s
+18:16:54 [INFO] main:    Polling interval: 5.0s
+18:16:54 [INFO] main: ============================================================
+18:16:54 [INFO] main: ============================================================
+18:16:54 [INFO] main: \U0001f680 Odds Divergence Detector STARTED � REAL MODE
+18:16:54 [INFO] main:    Bet365 sports: ['tennis', 'basketball', 'tabletennis', 'volleyball', 'badminton', 'icehockey', 'soccer']
+18:16:54 [INFO] main:    BetBurger login: NOT configured
+
+[STDERR] 18:16:54 [INFO] main:    Freeze threshold: 45.0s
+18:16:54 [INFO] main:    Polling interval: 5.0s
+18:16:54 [INFO] main: ============================================================
+INFO:     Application startup complete.
+
+[STDERR] INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+
+[STDOUT] INFO:     127.0.0.1:55310 - "GET / HTTP/1.1" 200 OK
+
+[STDOUT] INFO:     127.0.0.1:55310 - "GET /static/css/style.css HTTP/1.1" 304 Not Modified
+
+[STDOUT] INFO:     127.0.0.1:54243 - "GET /static/js/dashboard.js?v=3 HTTP/1.1" 200 OK
+
+[STDOUT] INFO:     127.0.0.1:54243 - "GET /api/config HTTP/1.1" 200 OK
+
+[STDOUT] INFO:     127.0.0.1:55310 - "GET /links HTTP/1.1" 200 OK
+
+[STDERR] INFO:     127.0.0.1:51533 - "WebSocket /ws" [accepted]
+
+[STDERR] INFO:     connection open
+
+[STDERR] 18:16:57 [ERROR] main: Error in poller loop: 'Bet1xScraper' object has no attribute 'scrape_events'
+Traceback (most recent call last):
+  File "C:\xampp\htdocs\odds_monitor\app\main.py", line 96, in poller_loop
+    xbet_task = xbet_scraper.scrape_events()
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Bet1xScraper' object has no attribute 'scrape_events'
+
+[STDERR] 18:16:57 [ERROR] main: Error in poller loop: 'Bet1xScraper' object has no attribute 'scrape_events'
+Traceback (most recent call last):
+  File "C:\xampp\htdocs\odds_monitor\app\main.py", line 96, in poller_loop
+    xbet_task = xbet_scraper.scrape_events()
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Bet1xScraper' object has no attribute 'scrape_events'
+
+[STDERR] C:\xampp\htdocs\odds_monitor\app\main.py:94: RuntimeWarning: coroutine 'Bet365Scraper.fetch_live_events' was never awaited
+  b365_task = bet365_scraper.fetch_live_events()
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+C:\xampp\htdocs\odds_monitor\app\main.py:95: RuntimeWarning: coroutine 'BetBurgerScraper.fetch_live_events' was never awaited
+  burger_task = betburger_scraper.fetch_live_events()
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+
+[STDERR] 18:17:02 [ERROR] main: Error in poller loop: 'Bet1xScraper' object has no attribute 'scrape_events'
+Traceback (most recent call last):
+  File "C:\xampp\htdocs\odds_monitor\app\main.py", line 96, in poller_loop
+    xbet_task = xbet_scraper.scrape_events()
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Bet1xScraper' object has no attribute 'scrape_events'
+
+[STDERR] C:\xampp\htdocs\odds_monitor\app\main.py:94: RuntimeWarning: coroutine 'Bet365Scraper.fetch_live_events' was never awaited
+  b365_task = bet365_scraper.fetch_live_events()
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+C:\xampp\htdocs\odds_monitor\app\main.py:95: RuntimeWarning: coroutine 'BetBurgerScraper.fetch_live_events' was never awaited
+  burger_task = betburger_scraper.fetch_live_events()
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+
+[STDERR] 18:17:02 [ERROR] main: Error in poller loop: 'Bet1xScraper' object has no attribute 'scrape_events'
+Traceback (most recent call last):
+  File "C:\xampp\htdocs\odds_monitor\app\main.py", line 96, in poller_loop
+    xbet_task = xbet_scraper.scrape_events()
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Bet1xScraper' object has no attribute 'scrape_events'
+

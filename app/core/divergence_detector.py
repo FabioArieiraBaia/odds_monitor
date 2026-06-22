@@ -232,9 +232,26 @@ class DivergenceDetector:
 
             # Alert condition: divergence where Burger is ahead AND (Bet365 is frozen OR game difference is high)
             if is_divergent and (is_frozen or game_diff >= self.min_game_difference):
+                
+                # ── Triangulation with 1xBet ──
+                xbet_event = self.state_cache.get_event(match_id, "1xbet")
+                is_triangulated = False
+                xbet_score = ""
+                if xbet_event:
+                    xbet_score = f"{xbet_event.set_score} ({xbet_event.game_score})"
+                    xbet_ahead_or_equal = not self._is_burger_ahead(
+                        xbet_event.set_score, xbet_event.game_score,
+                        burger_event.set_score, burger_event.game_score,
+                        xbet_event.point_score, burger_event.point_score
+                    )
+                    if xbet_ahead_or_equal:
+                        is_triangulated = True
+
                 # Determine Priority
                 priority = "MEDIUM"
-                if is_divergent and is_frozen:
+                if is_triangulated:
+                    priority = "CRITICAL"
+                elif is_divergent and is_frozen:
                     priority = "CRITICAL"
                 elif is_divergent:
                     priority = "HIGH"
@@ -258,6 +275,7 @@ class DivergenceDetector:
                     "sport": b365_event.sport,
                     "bet365_score": f"{b365_event.set_score} ({b365_event.game_score})",
                     "betburger_score": f"{burger_event.set_score} ({burger_event.game_score})",
+                    "xbet_score": xbet_score,
                     "bet365_points": b365_event.point_score,
                     "betburger_points": burger_event.point_score,
                     "freeze_seconds": round(freeze_duration, 1),
@@ -267,6 +285,7 @@ class DivergenceDetector:
                     "bet365_link": bet365_link,
                     "betburger_link": betburger_link,
                     "needs_verification": needs_verification,
+                    "is_triangulated": is_triangulated
                 })
 
                 logger.info(

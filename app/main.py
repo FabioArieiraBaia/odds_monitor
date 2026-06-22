@@ -26,6 +26,7 @@ from core.state_cache import StateCache
 from core.divergence_detector import DivergenceDetector
 from sources.bet365_scraper import Bet365Scraper
 from sources.betburger_source import BetBurgerScraper
+from sources.xbet_scraper import Bet1xScraper
 
 # ── Core Components ──
 state_cache = StateCache()
@@ -45,6 +46,11 @@ betburger_scraper = BetBurgerScraper(
     email=settings.BETBURGER_EMAIL,
     password=settings.BETBURGER_PASSWORD,
     headless=settings.BETBURGER_HEADLESS
+)
+
+xbet_scraper = Bet1xScraper(
+    headless=True,
+    sports=settings.BET365_SPORTS
 )
 
 _poller_task = None
@@ -87,20 +93,25 @@ async def poller_loop():
             # ── Fetch from both sources in parallel ──
             b365_task = bet365_scraper.fetch_live_events()
             burger_task = betburger_scraper.fetch_live_events()
+            xbet_task = xbet_scraper.fetch_live_events()
             
-            results = await asyncio.gather(b365_task, burger_task, return_exceptions=True)
+            results = await asyncio.gather(b365_task, burger_task, xbet_task, return_exceptions=True)
             
             b365_events = results[0] if not isinstance(results[0], Exception) else []
             burger_events = results[1] if not isinstance(results[1], Exception) else []
+            xbet_events = results[2] if not isinstance(results[2], Exception) else []
             
             if isinstance(results[0], Exception):
                 logger.error(f"Bet365 scraper error: {results[0]}")
             if isinstance(results[1], Exception):
                 logger.error(f"BetBurger scraper error: {results[1]}")
+            if isinstance(results[2], Exception):
+                logger.error(f"1xBet scraper error: {results[2]}")
             
             logger.info(
                 f"📊 Cycle: Bet365={len(b365_events)} | "
                 f"BetBurger={len(burger_events)} | "
+                f"1xBet={len(xbet_events)} | "
                 f"Cache={len(state_cache.get_all_active_match_ids())}"
             )
             
@@ -120,8 +131,11 @@ async def poller_loop():
             
             for event in burger_events:
                 state_cache.update(event)
+                
+            for event in xbet_events:
+                state_cache.update(event)
 
-            # ── Clean stale entries (BetBurger) ──
+            # ── Clean stale entries (BetBurger and 1xBet) ──
             state_cache.clear_stale(max_age_seconds=60.0)
 
             # ── Build update packet for UI ──

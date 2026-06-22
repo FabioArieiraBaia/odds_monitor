@@ -1,0 +1,35 @@
+[SETUP] Iniciando configuracao do ambiente...
+[SETUP] Python ja esta instalado.
+[SETUP] Instalando bibliotecas do projeto...
+Defaulting to user installation because normal site-packages is not writeable
+WARNING: Ignoring invalid distribution ~penai (C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages)
+Requirement already satisfied: pip in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (26.1.2)
+WARNING: Ignoring invalid distribution ~penai (C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages)
+WARNING: Ignoring invalid distribution ~penai (C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages)
+Defaulting to user installation because normal site-packages is not writeable
+WARNING: Ignoring invalid distribution ~penai (C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages)
+Requirement already satisfied: fastapi in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from -r requirements.txt (line 1)) (0.115.14)
+Requirement already satisfied: uvicorn in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from -r requirements.txt (line 2)) (0.34.3)
+Requirement already satisfied: playwright in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from -r requirements.txt (line 3)) (1.51.0)
+Requirement already satisfied: websockets in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from -r requirements.txt (line 4)) (15.0.1)
+Requirement already satisfied: jinja2 in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from -r requirements.txt (line 6)) (3.1.4)
+Requirement already satisfied: python-dotenv[cli] in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from -r requirements.txt (line 5)) (1.1.1)
+Requirement already satisfied: starlette<0.47.0,>=0.40.0 in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from fastapi->-r requirements.txt (line 1)) (0.46.2)
+Requirement already satisfied: pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,!=2.1.0,<3.0.0,>=1.7.4 in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from fastapi->-r requirements.txt (line 1)) (2.11.10)
+Requirement already satisfied: typing-extensions>=4.8.0 in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from fastapi->-r requirements.txt (line 1)) (4.14.1)
+Requirement already satisfied: annotated-types>=0.6.0 in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,!=2.1.0,<3.0.0,>=1.7.4->fastapi->-r requirements.txt (line 1)) (0.7.0)
+Requirement already satisfied: pydantic-core==2.33.2 in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,!=2.1.0,<3.0.0,>=1.7.4->fastapi->-r requirements.txt (line 1)) (2.33.2)
+Requirement already satisfied: typing-inspection>=0.4.0 in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,!=2.1.0,<3.0.0,>=1.7.4->fastapi->-r requirements.txt (line 1)) (0.4.2)
+Requirement already satisfied: anyio<5,>=3.6.2 in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from starlette<0.47.0,>=0.40.0->fastapi->-r requirements.txt (line 1)) (4.11.0)
+Requirement already satisfied: idna>=2.8 in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from anyio<5,>=3.6.2->starlette<0.47.0,>=0.40.0->fastapi->-r requirements.txt (line 1)) (3.11)
+Requirement already satisfied: sniffio>=1.1 in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from anyio<5,>=3.6.2->starlette<0.47.0,>=0.40.0->fastapi->-r requirements.txt (line 1)) (1.3.1)
+Requirement already satisfied: click>=7.0 in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from uvicorn->-r requirements.txt (line 2)) (8.1.8)
+Requirement already satisfied: h11>=0.8 in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from uvicorn->-r requirements.txt (line 2)) (0.16.0)
+Requirement already satisfied: pyee<13,>=12 in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from playwright->-r requirements.txt (line 3)) (12.1.1)
+Requirement already satisfied: greenlet<4.0.0,>=3.1.1 in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from playwright->-r requirements.txt (line 3)) (3.2.4)
+Requirement already satisfied: MarkupSafe>=2.0 in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from jinja2->-r requirements.txt (line 6)) (2.1.5)
+Requirement already satisfied: colorama in C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages (from click>=7.0->uvicorn->-r requirements.txt (line 2)) (0.4.6)
+WARNING: Ignoring invalid distribution ~penai (C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages)
+WARNING: Ignoring invalid distribution ~penai (C:\Users\fabio\AppData\Roaming\Python\Python311\site-packages)
+[SETUP] Instalando navegador invisivel (Playwright Chromium)...
+[SETUP] Configuracao concluida com sucesso

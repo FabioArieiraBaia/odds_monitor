@@ -542,12 +542,25 @@ function renderAlerts() {
             ? `<span class="alert-diff-badge">Δ ${gameDiff} game${gameDiff > 1 ? 's' : ''}</span>`
             : '';
 
+        // Triangulation badge
+        const triangulatedBadge = alert.is_triangulated 
+            ? `<div style="background: #27ae60; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; margin-bottom: 8px; display: inline-block;">🎯 1XBET CONFIRMOU A VANTAGEM!</div>`
+            : '';
+
+        const xbetScoreHtml = alert.is_triangulated
+            ? `<div class="alert-source alert-source-ahead" style="border-left: 3px solid #27ae60; margin-top: 8px;">
+                   <div class="alert-source-label">1XBET <span class="alert-arrow" style="color: #27ae60;">▲ confirmou</span></div>
+                   <div class="alert-source-score">${alert.xbet_score || '-'}</div>
+               </div>`
+            : '';
+
         return `
             <div class="alert-item ${prioClass}">
                 <div class="alert-header">
                     <span>🚨 DIVERGÊNCIA ${alert.sport ? '[' + alert.sport.toUpperCase() + ']' : ''}</span>
                     <span class="badge-${priority.toLowerCase()}">${priority}</span>
                 </div>
+                ${triangulatedBadge}
                 <div class="alert-match-name">${emoji} ${matchName} ${diffBadge}</div>
                 ${messageHtml}
                 <div class="alert-scores-grid">
@@ -563,6 +576,7 @@ function renderAlerts() {
                         <div class="alert-source-pts">${alert.bet365_points && alert.bet365_points !== '0' ? 'Pts: ' + alert.bet365_points : ''}</div>
                     </div>
                 </div>
+                ${xbetScoreHtml}
                 <div class="alert-meta">
                     ${freezeHtml}
                     <span class="alert-timestamp">${relTime}</span>
