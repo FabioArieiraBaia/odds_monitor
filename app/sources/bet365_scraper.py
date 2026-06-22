@@ -117,37 +117,62 @@ class Bet365Scraper(BaseSource):
                 raise
 
     async def _cleanup(self):
-        """Gracefully close all browser resources."""
+        """Gracefully close all browser resources and kill Chrome process tree."""
         self._is_running = False
-        try:
-            if self.page and not self.page.is_closed():
-                await self.page.close()
-        except:
-            pass
-        try:
-            if self.context:
-                await self.context.close()
-        except:
-            pass
-        try:
-            if self.browser:
-                await self.browser.close()
-        except:
-            pass
+        logger.info("[Bet365] Shutting down browser...")
+        
+        # Close Playwright objects first
+        for attr, label in [('page', 'page'), ('context', 'context'), ('browser', 'browser')]:
+            obj = getattr(self, attr, None)
+            if obj is None:
+                continue
+            try:
+                if attr == 'page' and not obj.is_closed():
+                    await obj.close()
+                else:
+                    await obj.close()
+            except Exception as e:
+                logger.debug(f"[Bet365] Error closing {label}: {e}")
+            setattr(self, attr, None)
+        
+        # Stop Playwright
         try:
             if hasattr(self, '_pw'):
                 await self._pw.stop()
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"[Bet365] Error stopping playwright: {e}")
+        
+        # Kill Chrome process tree (Windows: taskkill /T kills all children)
+        if self.chrome_process:
+            pid = self.chrome_process.pid
+            try:
+                logger.info(f"[Bet365] Killing Chrome (PID {pid}) and its tree...")
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True, timeout=5
+                )
+            except Exception as e:
+                logger.debug(f"[Bet365] taskkill failed: {e} — trying terminate()")
+                try:
+                    self.chrome_process.terminate()
+                    self.chrome_process.wait(timeout=3)
+                except Exception:
+                    try:
+                        self.chrome_process.kill()
+                    except Exception:
+                        pass
+            self.chrome_process = None
+        
+        # Kill any Chrome listening on port 9222 (safety net)
         try:
-            if self.chrome_process:
-                self.chrome_process.terminate()
-                self.chrome_process = None
-        except:
+            subprocess.run(
+                'for /f "tokens=5" %a in ("netstat -ano | findstr :9222") do taskkill /PID %a /T /F',
+                shell=True, capture_output=True, timeout=3
+            )
+        except Exception:
             pass
-        self.page = None
-        self.context = None
-        self.browser = None
+        
+        logger.info("[Bet365] Shutdown complete.")
 
     async def stop(self):
         await self._cleanup()

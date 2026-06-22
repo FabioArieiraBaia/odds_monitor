@@ -1,5 +1,5 @@
 const { app, BrowserWindow } = require('electron');
-const { spawn } = require('child_process');
+const { spawn, exec, execSync } = require('child_process');
 const path = require('path');
 const net = require('net');
 const fs = require('fs');
@@ -7,6 +7,10 @@ const fs = require('fs');
 let mainWindow;
 let pythonProcess;
 let setupProcess;
+let isQuitting = false;
+
+// Track Chrome debug ports used by our scrapers
+const SCRAPER_DEBUG_PORTS = [9222, 9223];
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -66,6 +70,14 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     require('electron').shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  mainWindow.on('close', function (e) {
+    if (!isQuitting) {
+      e.preventDefault();
+      isQuitting = true;
+      gracefulShutdown();
+    }
   });
 
   mainWindow.on('closed', function () {
@@ -153,14 +165,67 @@ app.on('activate', function () {
   }
 });
 
-app.on('will-quit', () => {
-  const { exec } = require('child_process');
-  
+function killChromeOrphans() {
+  // Kill Chrome/Edge processes listening on our scraper debug ports
+  SCRAPER_DEBUG_PORTS.forEach(port => {
+    try {
+      // Find PID listening on the debug port and kill the whole tree
+      const result = execSync(
+        `for /f "tokens=5" %a in ('netstat -ano ^| findstr :${port}') do taskkill /PID %a /T /F`,
+        { shell: 'cmd.exe', timeout: 3000, stdio: 'pipe' }
+      );
+    } catch (e) {
+      // Port not in use or already dead — that's fine
+    }
+  });
+}
+
+async function gracefulShutdown() {
+  console.log('[Shutdown] Starting graceful shutdown...');
+
+  // Step 1: Ask Python to shut down gracefully (FastAPI lifespan shutdown)
   if (pythonProcess && pythonProcess.pid) {
-    console.log('Killing Python process tree...');
-    exec(`taskkill /pid ${pythonProcess.pid} /T /F`, () => {});
+    console.log('[Shutdown] Sending SIGTERM to Python...');
+    try {
+      // Send graceful signal via HTTP so FastAPI lifespan runs
+      exec('curl -s -X POST http://127.0.0.1:8000/shutdown 2>nul', () => {});
+      pythonProcess.kill('SIGTERM');
+    } catch(e) {}
+  }
+
+  // Step 2: Wait 4 seconds for Python scrapers to close Chrome gracefully
+  await new Promise(resolve => setTimeout(resolve, 4000));
+
+  // Step 3: Force-kill Python process tree (in case it didn't exit)
+  if (pythonProcess && pythonProcess.pid) {
+    console.log('[Shutdown] Force-killing Python process tree...');
+    try { execSync(`taskkill /pid ${pythonProcess.pid} /T /F`, { stdio: 'pipe' }); } catch(e) {}
   }
   if (setupProcess && setupProcess.pid) {
-    exec(`taskkill /pid ${setupProcess.pid} /T /F`, () => {});
+    try { execSync(`taskkill /pid ${setupProcess.pid} /T /F`, { stdio: 'pipe' }); } catch(e) {}
+  }
+
+  // Step 4: Kill any orphan Chrome processes on scraper debug ports
+  console.log('[Shutdown] Killing orphan Chrome processes...');
+  killChromeOrphans();
+
+  // Step 5: Actually quit
+  console.log('[Shutdown] Done. Quitting app.');
+  app.exit(0);
+}
+
+// Handle unexpected exits cleanly
+app.on('before-quit', (e) => {
+  if (!isQuitting) {
+    e.preventDefault();
+    isQuitting = true;
+    gracefulShutdown();
+  }
+});
+
+process.on('SIGINT', () => {
+  if (!isQuitting) {
+    isQuitting = true;
+    gracefulShutdown();
   }
 });

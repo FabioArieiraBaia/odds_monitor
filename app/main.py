@@ -4,6 +4,9 @@ Real-time comparison of Bet365 and BetBurger live events using Playwright scrape
 Zero mock data. Everything is real.
 """
 import asyncio
+import atexit
+import signal
+import subprocess
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -45,6 +48,22 @@ betburger_scraper = BetBurgerScraper(
 )
 
 _poller_task = None
+
+
+def _emergency_kill_chrome():
+    """Last-resort cleanup: kill any Chrome processes on scraper debug ports."""
+    for port in [9222, 9223]:
+        try:
+            subprocess.run(
+                f'for /f "tokens=5" %a in ("netstat -ano | findstr :{port}") do taskkill /PID %a /T /F',
+                shell=True, capture_output=True, timeout=3
+            )
+        except Exception:
+            pass
+
+
+# Register emergency cleanup on interpreter exit (catches SIGTERM/force-kill)
+atexit.register(_emergency_kill_chrome)
 
 
 async def poller_loop():
