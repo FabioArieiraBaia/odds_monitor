@@ -150,7 +150,7 @@ class BetBurgerScraper(BaseSource):
         # Kill any Chrome listening on port 9223 (safety net)
         try:
             subprocess.run(
-                'for /f "tokens=5" %a in ("netstat -ano | findstr :9223") do taskkill /PID %a /T /F',
+                'for /f "tokens=5" %a in (\'netstat -ano ^| findstr :9223\') do taskkill /PID %a /T /F',
                 shell=True, capture_output=True, timeout=3
             )
         except Exception:

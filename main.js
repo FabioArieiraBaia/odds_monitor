@@ -189,7 +189,6 @@ async function gracefulShutdown() {
     try {
       // Send graceful signal via HTTP so FastAPI lifespan runs
       exec('curl -s -X POST http://127.0.0.1:8000/shutdown 2>nul', () => {});
-      pythonProcess.kill('SIGTERM');
     } catch(e) {}
   }
 

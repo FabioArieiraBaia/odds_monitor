@@ -166,7 +166,7 @@ class Bet365Scraper(BaseSource):
         # Kill any Chrome listening on port 9222 (safety net)
         try:
             subprocess.run(
-                'for /f "tokens=5" %a in ("netstat -ano | findstr :9222") do taskkill /PID %a /T /F',
+                'for /f "tokens=5" %a in (\'netstat -ano ^| findstr :9222\') do taskkill /PID %a /T /F',
                 shell=True, capture_output=True, timeout=3
             )
         except Exception:
@@ -227,13 +227,13 @@ class Bet365Scraper(BaseSource):
                         return true;
                     }""",
                     arg=[sport_code],
-                    timeout=8000
+                    timeout=25000
                 )
                 # Mais 1 segundo para garantir que o DOM foi populado com as odds e placares
                 await asyncio.sleep(1)
             except Exception as wait_err:
                 logger.warning(f"Timeout waiting for sport load ({sport_code}): {wait_err}. Using fallback sleep...")
-                await asyncio.sleep(3)
+                await asyncio.sleep(10)
                 
         except Exception as e:
             logger.warning(f"Navigation to {sport_code} failed: {e}")
@@ -307,14 +307,20 @@ class Bet365Scraper(BaseSource):
                                 '.ovm-FixtureName_Name',
                                 '[class*="ParticipantName"]',
                                 '[class*="TeamName"]',
+                                '[class*="FixtureDetailsTwoWay_TeamName"]',
+                                '[class*="FixtureDetailsWithIndicators_Team"]',
                                 '[class*="Fixture"] [class*="Name"]',
+                                '[class*="Team"]',
                             ];
                             
                             let names = [];
                             for (const nSel of nameSelectors) {
                                 const nameEls = fixture.querySelectorAll(nSel);
-                                if (nameEls.length >= 2) {
-                                    names = Array.from(nameEls).map(e => e.textContent.trim());
+                                const validNames = Array.from(nameEls)
+                                    .map(e => e.textContent.trim())
+                                    .filter(t => t.length > 0);
+                                if (validNames.length >= 2) {
+                                    names = validNames.slice(0, 2);
                                     break;
                                 }
                             }
@@ -323,64 +329,42 @@ class Bet365Scraper(BaseSource):
                             const matchName = names.join(' vs ');
                             if (matchName.length < 3) continue;
                             
-                            // ── Extract scores PER PARTICIPANT ROW ──
-                            // Bet365 renders scores in participant rows. Each row has
-                            // the participant name followed by score cells.
-                            // We extract all numeric leaf-text from each row separately.
-                            
-                            const participantSelectors = [
-                                '[class*="Participant"]',   // Common wrapper
-                                '.ovm-ParticipantOddsOnly', // Odds-only view
-                                '[class*="ScoreCouponRow"]', // Score row
-                                '.ovm-FixtureDetailParticipant', // Detail view
-                            ];
-                            
-                            let p1Scores = [];
-                            let p2Scores = [];
-                            
-                            // Strategy A: find participant rows and extract scores from each
-                            let participantRows = [];
-                            for (const pSel of participantSelectors) {
-                                participantRows = Array.from(fixture.querySelectorAll(pSel));
-                                if (participantRows.length >= 2) break;
-                            }
-                            
+                            // ── Extract scores ──
                             function isVisible(el) {
                                 if (el.offsetParent !== null) return true;
                                 const rect = el.getBoundingClientRect();
                                 return rect.width > 0 && rect.height > 0;
                             }
-
-                            function extractNums(el) {
-                                const nums = [];
-                                // Get all score-like elements within this row
-                                const scoreEls = el.querySelectorAll(
-                                    '[class*="Score"], [class*="score"], .ovm-ScoreWrapper_Score'
-                                );
-                                if (scoreEls.length > 0) {
-                                    for (const sEl of scoreEls) {
-                                        if (!isVisible(sEl)) continue;
-                                        const t = sEl.textContent.trim();
-                                        if (/^\d+$/.test(t) || /^[Aa]d?v?$/.test(t)) {
-                                            nums.push(t);
-                                        }
-                                    }
-                                }
-                                // Fallback: walk leaf nodes
-                                if (nums.length === 0) {
-                                    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-                                    let node;
-                                    while (node = walker.nextNode()) {
-                                        const t = node.textContent.trim();
-                                        if (/^\d+$/.test(t)) nums.push(t);
-                                    }
-                                }
-                                return nums;
-                            }
                             
-                            if (participantRows.length >= 2) {
-                                p1Scores = extractNums(participantRows[0]);
-                                p2Scores = extractNums(participantRows[1]);
+                            // Target all individual score pill elements
+                            const scorePills = Array.from(fixture.querySelectorAll('.ovm-ScorePill'))
+                                .filter(isVisible);
+                                
+                            let p1Scores = [];
+                            let p2Scores = [];
+                            
+                            if (scorePills.length > 0) {
+                                // Group score pills by their parent (column wrapper)
+                                const parentMap = new Map();
+                                for (const pill of scorePills) {
+                                    const parent = pill.parentElement;
+                                    if (!parentMap.has(parent)) {
+                                        parentMap.set(parent, []);
+                                    }
+                                    parentMap.get(parent).push(pill);
+                                }
+                                
+                                for (const colPills of parentMap.values()) {
+                                    const cleanedPills = colPills.map(p => p.textContent.trim())
+                                        .filter(t => /^\d+$/.test(t) || /^[Aa]d?v?$/.test(t));
+                                    if (cleanedPills.length >= 2) {
+                                        p1Scores.push(cleanedPills[0]);
+                                        p2Scores.push(cleanedPills[1]);
+                                    } else if (cleanedPills.length === 1) {
+                                        p1Scores.push(cleanedPills[0]);
+                                        p2Scores.push("0");
+                                    }
+                                }
                             }
                             
                             // Strategy B fallback: flat score extraction
@@ -391,6 +375,8 @@ class Bet365Scraper(BaseSource):
                                 );
                                 for (const el of scoreEls) {
                                     if (!isVisible(el)) continue;
+                                    // ONLY target leaf nodes to avoid concatenated parent texts
+                                    if (el.children.length > 0) continue;
                                     const t = el.textContent.trim();
                                     if (/^\d+$/.test(t) || /^[Aa]d?v?$/.test(t)) {
                                         flatScores.push(t);

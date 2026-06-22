@@ -126,3 +126,20 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+
+@app.post("/shutdown")
+async def shutdown_endpoint():
+    import os
+    import signal
+    import logging
+    log = logging.getLogger("web.server")
+    log.info("Recebido pedido de encerramento do backend via HTTP API")
+    
+    async def self_terminate():
+        await asyncio.sleep(0.5)
+        os.kill(os.getpid(), signal.SIGTERM)
+        
+    asyncio.create_task(self_terminate())
+    return {"status": "shutting_down"}
+
