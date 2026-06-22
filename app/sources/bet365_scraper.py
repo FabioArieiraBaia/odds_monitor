@@ -254,8 +254,12 @@ class Bet365Scraper(BaseSource):
                     
                     let fixtures = [];
                     for (const sel of selectors) {
-                        fixtures = document.querySelectorAll(sel);
-                        if (fixtures.length > 0) break;
+                        const els = Array.from(document.querySelectorAll(sel));
+                        const visibleEls = els.filter(el => el.offsetParent !== null);
+                        if (visibleEls.length > 0) {
+                            fixtures = visibleEls;
+                            break;
+                        }
                     }
                     
                     if (fixtures.length === 0) {
@@ -265,7 +269,7 @@ class Bet365Scraper(BaseSource):
                         // Group by parent
                         const parents = new Set();
                         allElements.forEach(el => {
-                            if (el.parentElement) parents.add(el.parentElement);
+                            if (el.parentElement && el.parentElement.offsetParent !== null) parents.add(el.parentElement);
                         });
                         fixtures = Array.from(parents);
                     }
@@ -455,10 +459,10 @@ class Bet365Scraper(BaseSource):
             if len(scores) >= 2:
                 game_score = f"{scores[0]}:{scores[1]}"
         elif sport in ("tabletennis", "badminton", "volleyball", "beach_volley"):
-            # Set-based sports: [sets_p1, sets_p2, current_set_score_p1, current_set_score_p2]
+            # Set-based sports: Bet365 DOM structure is usually row-based: [SetHome, PointHome, SetAway, PointAway]
             if len(scores) >= 4:
-                set_score = f"{scores[0]}:{scores[1]}"
-                game_score = f"{scores[2]}:{scores[3]}"
+                set_score = f"{scores[0]}:{scores[2]}"
+                game_score = f"{scores[1]}:{scores[3]}"
             elif len(scores) >= 2:
                 game_score = f"{scores[0]}:{scores[1]}"
         else:
