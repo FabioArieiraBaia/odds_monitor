@@ -16,7 +16,7 @@ from core.normalizer import NormalizedEvent
 logger = logging.getLogger(__name__)
 
 BETBURGER_BASE = "https://www.betburger.com"
-BETBURGER_LIVE_URL = f"{BETBURGER_BASE}/api/live"
+BETBURGER_LIVE_URL = f"{BETBURGER_BASE}/events/live"
 
 
 class BetBurgerScraper(BaseSource):
@@ -362,8 +362,7 @@ class BetBurgerScraper(BaseSource):
                     except Exception as e:
                         logger.debug(f"Error parsing JSON item: {e}")
                 
-            # --- OLD DOM EXTRACTOR REMOVED ---
-            # We will use the raw text extraction below.
+            # --- STRUCTURED DOM EXTRACTOR ---
             raw_data = await self.page.evaluate("""
                 () => {
                     const results = [];
@@ -371,27 +370,101 @@ class BetBurgerScraper(BaseSource):
                     
                     for (const row of rows) {
                         try {
-                            // Extract text with newlines between children to match BeautifulSoup
-                            let text = "";
-                            const elements = row.querySelectorAll('*');
-                            if (elements.length > 0) {
-                                for (const el of elements) {
-                                    if (el.children.length === 0 && el.textContent.trim()) {
-                                        text += el.textContent.trim() + "\\n";
-                                    }
-                                }
+                            const sportEl = row.querySelector('.sport-name');
+                            const sport = sportEl ? sportEl.textContent.trim() : '';
+                            
+                            const percentEl = row.querySelector('.percent');
+                            const percentText = percentEl ? percentEl.textContent.trim() : '';
+                            
+                            let match_name = '';
+                            let href = '';
+                            const eventLink = row.querySelector('.event-name .name a, .event-name a');
+                            if (eventLink) {
+                                match_name = eventLink.textContent.trim();
+                                href = eventLink.getAttribute('href') || '';
                             } else {
-                                text = row.innerText || row.textContent || '';
+                                const nameEl = row.querySelector('.event-name .name');
+                                if (nameEl) match_name = nameEl.textContent.trim();
                             }
                             
-                            if (text.length < 10) continue;
+                            const bets = [];
+                            const betWrappers = row.querySelectorAll('.bet-wrapper');
+                            for (const bet of betWrappers) {
+                                const bookieEl = bet.querySelector('.bookmaker-name');
+                                const scoreEl = bet.querySelector('.bookmaker-name .current-score, .current-score');
+                                if (bookieEl) {
+                                    let bookmaker = '';
+                                    const linkSpan = bookieEl.querySelector('.link-span, span');
+                                    if (linkSpan) {
+                                        bookmaker = linkSpan.textContent.trim();
+                                    } else {
+                                        const clone = bookieEl.cloneNode(true);
+                                        const scoreChild = clone.querySelector('.current-score');
+                                        if (scoreChild) scoreChild.remove();
+                                        bookmaker = clone.textContent.trim();
+                                    }
+                                    bets.push({
+                                        bookmaker: bookmaker,
+                                        score: scoreEl ? scoreEl.textContent.trim() : ''
+                                    });
+                                }
+                            }
                             
-                            results.push({
-                                text: text,
-                                html: row.innerHTML
-                            });
+                            if (bets.length > 0) {
+                                results.push({
+                                    sport: sport,
+                                    match_name: match_name,
+                                    percent_text: percentText,
+                                    bets: bets,
+                                    href: href,
+                                    raw_text: row.textContent || row.innerText || ''
+                                });
+                            }
                         } catch (e) {}
                     }
+                    
+                    // Fallback to Events Live page table if no surebet rows were found
+                    if (results.length === 0) {
+                        const eventRows = document.querySelectorAll('tr.events-table-row');
+                        for (const row of eventRows) {
+                            try {
+                                const tds = row.querySelectorAll('td');
+                                if (tds.length === 0) continue;
+                                
+                                const rowText = row.textContent || row.innerText || '';
+                                const sportText = tds[0].textContent.trim();
+                                
+                                let match_name = '';
+                                let raw_match_cell = '';
+                                
+                                for (const td of tds) {
+                                    const text = td.textContent.trim();
+                                    // Find the TD that contains the teams (has " - " and is long enough to not be just a date)
+                                    if (text.includes(' - ') && !match_name && text.length > 10 && !/^\d{2}\.\d{2}\.\d{4}/.test(text)) {
+                                        raw_match_cell = text;
+                                        // Clean scores from match name (e.g., "Player A - Player B 1:1 (1:2...)")
+                                        match_name = text.replace(/\s+\d+:\d+.*/, '').trim();
+                                    }
+                                }
+                                
+                                if (match_name) {
+                                    // Find scores from the raw cell text
+                                    const scores = raw_match_cell.match(/\d+:\d+/g) || [];
+                                    
+                                    results.push({
+                                        sport: sportText,
+                                        match_name: match_name,
+                                        percent_text: '0%',
+                                        bets: [],
+                                        href: '',
+                                        scores: scores,
+                                        raw_text: rowText
+                                    });
+                                }
+                            } catch (e) {}
+                        }
+                    }
+                    
                     return results;
                 }
             """)
@@ -402,51 +475,79 @@ class BetBurgerScraper(BaseSource):
             
             for item in raw_data:
                 try:
-                    text = item.get('text', '')
-                    # Extract sport
-                    sport = "unknown"
-                    for s in ["Tennis", "Soccer", "Basketball", "Volleyball", "Table Tennis", "Badminton", "Ice Hockey", "Baseball"]:
-                        if s in text:
-                            sport = s.lower().replace(" ", "")
-                            break
-                            
-                    # Find match name using regex (Team A - Team B)
-                    # We look for a pattern like "Some Team Name - Another Team Name"
-                    # But we also want to avoid catching "AH1(-1.5)" or "ATP - London"
-                    match_name = ""
+                    # 1. Sport
+                    sport_raw = item.get('sport', '')
+                    sport = sport_raw.lower().replace(" ", "")
                     
-                    # Split the text by multiple spaces or newlines to get lines
-                    lines = re.split(r'\n|\s{2,}', text)
-                    for line in lines:
-                        line = line.strip()
-                        if " - " in line and len(line) > 5 and not "for Team" in line and not "AH" in line:
-                            # It could have multiple " - ", let's take the first one that looks like a match
-                            parts = line.split(" - ")
-                            if len(parts) >= 2:
-                                match_name = f"{parts[0].strip()} - {parts[1].strip()}"
-                                break
-                                
+                    # 2. Match Name
+                    match_name = item.get('match_name', '').strip()
                     if not match_name:
-                        # Fallback for Match Name
-                        m = re.search(r'([A-Za-z\.\s]+)\s+-\s+([A-Za-z\.\s]+)', text)
-                        if m:
-                            match_name = f"{m.group(1).strip()} - {m.group(2).strip()}"
-                        else:
-                            continue
+                        continue
+                    
+                    scores_found = item.get('scores')
+                    if scores_found is not None:
+                        # Fallback event parser route
+                        sport = self._detect_sport(item.get('raw_text', ''))
+                        if sport == "unknown":
+                            sport = self._detect_sport(match_name)
+                        if sport == "unknown":
+                            sport = "tennis"
                             
-                    # Extract score
-                    # Find patterns like 1:1 (6:2, 6:7, 0:0) 0:0 or just 3:1
-                    scores = re.findall(r'\d+:\d+', text)
-                    set_score, game_score, point_score = self._parse_scores(scores, sport)
+                        set_score, game_score, point_score = self._parse_scores(scores_found, sport)
+                        surebet_perc = 0.0
+                        bets = []
+                    else:
+                        # Original surebet parser route
+                        # 3. Surebet Percentage
+                        percent_text = item.get('percent_text', '')
+                        surebet_perc = 0.0
+                        perc_match = re.search(r'(\d+(?:\.\d+)?)%', percent_text)
+                        if perc_match:
+                            surebet_perc = float(perc_match.group(1))
+                        
+                        # 4. Extract scores of each bookmaker
+                        bets = item.get('bets', [])
+                        non_b365_scores = []
+                        b365_scores = []
+                        
+                        for b in bets:
+                            bookie = b.get('bookmaker', '').lower()
+                            score_str = b.get('score', '')
+                            if not score_str:
+                                continue
+                            if '365' in bookie:
+                                b365_scores.append(score_str)
+                            else:
+                                non_b365_scores.append(score_str)
+                                
+                        # Select the reference score
+                        selected_score_str = None
+                        scores_to_evaluate = non_b365_scores if non_b365_scores else b365_scores
+                        
+                        if scores_to_evaluate:
+                            best_score_str = scores_to_evaluate[0]
+                            max_val = -1
+                            for s_str in scores_to_evaluate:
+                                scores_found_in_bet = re.findall(r'\d+:\d+', s_str)
+                                temp_sets, temp_games, _ = self._parse_scores(scores_found_in_bet, sport)
+                                s_h, s_a = self._parse_score_pair(temp_sets)
+                                g_h, g_a = self._parse_score_pair(temp_games)
+                                val = (s_h + s_a) * 10 + (g_h + g_a)
+                                if val > max_val:
+                                    max_val = val
+                                    best_score_str = s_str
+                            selected_score_str = best_score_str
+                        else:
+                            selected_score_str = "0:0"
+                            
+                        # Extract the selected scores
+                        scores_found_in_bet = re.findall(r'\d+:\d+', selected_score_str)
+                        set_score, game_score, point_score = self._parse_scores(scores_found_in_bet, sport)
                     
                     match_id = self._normalize_name(match_name)
+                    href = item.get('href', '')
+                    deep_link = f"https://www.betburger.com{href}" if href else BETBURGER_LIVE_URL
                     
-                    # Extract surebet percentage (e.g. "0.99%")
-                    surebet_perc = 0.0
-                    perc_match = re.search(r'(\d+\.\d+)%', text)
-                    if perc_match:
-                        surebet_perc = float(perc_match.group(1))
-                        
                     events.append(NormalizedEvent(
                         match_id=match_id,
                         match_name=match_name,
@@ -456,20 +557,31 @@ class BetBurgerScraper(BaseSource):
                         game_score=game_score,
                         point_score=point_score,
                         timestamp=now,
-                        deep_link=BETBURGER_LIVE_URL,
+                        deep_link=deep_link,
                         extra_data={
-                            "raw_text": text,
-                            "surebet_percentage": surebet_perc
+                            "raw_text": item.get('raw_text', ''),
+                            "surebet_percentage": surebet_perc,
+                            "bets": bets
                         }
                     ))
                 except Exception as e:
-                    logger.error(f"Error parsing BetBurger text row: {e} | Text: {text[:50]}")
+                    logger.error(f"Error parsing BetBurger structured item: {e} | Item: {item}")
             return events
         
         except Exception as e:
             logger.error(f"Error extracting BetBurger surebets: {e}")
         
         return events
+
+    def _parse_score_pair(self, score: str) -> tuple:
+        """Parse 'H:A' into (home, away) ints. Returns (0,0) on failure."""
+        try:
+            parts = score.split(":")
+            if len(parts) >= 2:
+                return int(parts[0].strip()), int(parts[1].strip())
+        except Exception:
+            pass
+        return 0, 0
 
     def _parse_scores(self, scores: List[str], sport: str) -> tuple:
         """Parse score array of 'Home:Away' strings into (set_score, game_score, point_score)."""
@@ -583,9 +695,9 @@ class BetBurgerScraper(BaseSource):
             if not self._is_logged_in and self.email and self.password:
                 await self._login()
             
-            # Se nao esta na pagina da API, navega para ela
-            if "api/live" not in current_url:
-                logger.info("Navegando para API do BetBurger...")
+            # Se nao esta na pagina de eventos, navega para ela
+            if "events/live" not in current_url:
+                logger.info("Navegando para aba de Eventos do BetBurger...")
                 try:
                     await self.page.goto(BETBURGER_LIVE_URL, wait_until="domcontentloaded", timeout=30000)
                     await asyncio.sleep(4)
@@ -595,7 +707,7 @@ class BetBurgerScraper(BaseSource):
                     await self.page.goto(BETBURGER_LIVE_URL, wait_until="domcontentloaded", timeout=30000)
                     await asyncio.sleep(4)
             else:
-                # Reload para pegar dados frescos da API
+                # Reload para pegar dados frescos
                 try:
                     logger.info("Recarregando página do BetBurger...")
                     await self.page.reload(wait_until="domcontentloaded", timeout=30000)

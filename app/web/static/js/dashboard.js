@@ -239,7 +239,7 @@ function connectWS() {
             renderLiveMatches(lastMatches);
             if (data.stats) updateStats(data.stats);
         } else if (data.type === 'alerts') {
-            triggerAlerts(data.alerts);
+            triggerAlerts(data.alerts || []);
         }
     };
 }
@@ -469,11 +469,33 @@ function applyScoreFlash(matches) {
 // ════════════════════════════════════════════
 // ALERTS
 // ════════════════════════════════════════════
-function triggerAlerts(alerts) {
-    if (!alerts || alerts.length === 0) return;
+function triggerAlerts(activeAlerts) {
+    if (!activeAlerts) activeAlerts = [];
 
-    // Play sound (if not muted)
-    if (!isMuted) {
+    // Map existing alerts by match_id to preserve their _receivedAt timestamp
+    const existingAlertsMap = {};
+    alertHistory.forEach(a => existingAlertsMap[a.match_id] = a);
+
+    let hasNew = false;
+    const newHistory = [];
+
+    activeAlerts.forEach(alert => {
+        const existing = existingAlertsMap[alert.match_id];
+        if (existing) {
+            alert._receivedAt = existing._receivedAt; // Preserve original time
+            newHistory.push(alert);
+        } else {
+            alert._receivedAt = Date.now();
+            newHistory.push(alert);
+            hasNew = true;
+            showToast(alert); // Show toast only for brand new alerts
+        }
+    });
+
+    alertHistory = newHistory;
+
+    // Play sound ONLY if there are NEW alerts (if not muted)
+    if (hasNew && !isMuted) {
         try {
             audioAlert.currentTime = 0;
             audioAlert.play();
@@ -481,16 +503,6 @@ function triggerAlerts(alerts) {
             console.log('Audio play blocked by browser autoplay policy.');
         }
     }
-
-    // Prepend to alert history
-    alerts.forEach(alert => {
-        alert._receivedAt = Date.now();
-        alertHistory.unshift(alert);
-        if (alertHistory.length > MAX_ALERTS) alertHistory.pop();
-
-        // Show toast notification
-        showToast(alert);
-    });
 
     renderAlerts();
     updateAlertBadge();

@@ -32,7 +32,7 @@ state_cache = StateCache()
 detector = DivergenceDetector(
     state_cache=state_cache,
     freeze_threshold_seconds=settings.FREEZE_THRESHOLD_SECONDS,
-    min_game_difference=settings.MIN_GAME_DIFFERENCE
+    min_game_difference=999
 )
 
 # ── Real Scrapers (NO MOCKS) ──
@@ -104,14 +104,25 @@ async def poller_loop():
                 f"Cache={len(state_cache.get_all_active_match_ids())}"
             )
             
-            # ── Update cache ──
+            # ── Update Cache & Evict Missing Matches ──
+            b365_ids_in_scrape = set()
             for event in b365_events:
+                b365_ids_in_scrape.add(event.match_id)
                 state_cache.update(event)
+                
+            # If the scrape was successful, immediately drop Bet365 matches that are no longer on the page
+            if len(b365_events) > 0:
+                for match_id in list(state_cache._cache.keys()):
+                    if "bet365" in state_cache._cache[match_id] and match_id not in b365_ids_in_scrape:
+                        state_cache._cache[match_id].pop("bet365", None)
+                        if "bet365" in state_cache._last_changed.get(match_id, {}):
+                            state_cache._last_changed[match_id].pop("bet365", None)
+            
             for event in burger_events:
                 state_cache.update(event)
 
-            # ── Clean stale entries ──
-            state_cache.clear_stale()
+            # ── Clean stale entries (BetBurger) ──
+            state_cache.clear_stale(max_age_seconds=60.0)
 
             # ── Build update packet for UI ──
             active_matches = []
@@ -167,14 +178,34 @@ async def poller_loop():
                 }
             })
 
-            # ── Check for divergences & broadcast alerts ──
-            alerts = detector.check_divergences()
-            if alerts:
-                await manager.broadcast({
-                    "type": "alerts",
-                    "alerts": alerts
-                })
-                logger.warning(f"🚨 {len(alerts)} divergence(s) detected!")
+            # ── Check for divergences & verify them ──
+            raw_alerts = detector.check_divergences()
+            verified_alerts = []
+            needs_reload = False
+            
+            for alert in raw_alerts:
+                # If Bet365 seems frozen, verify it's not a false positive before alerting
+                freeze_seconds = alert.get("freeze_seconds", 0)
+                if alert.get("needs_verification") and freeze_seconds >= 14.0:
+                    time_since_reload = (datetime.now() - bet365_scraper._last_reload).total_seconds()
+                    if time_since_reload > 20.0:
+                        logger.warning(f"Suspected false positive for {alert['match_name']} (freeze {freeze_seconds}s). Suppressing alert and forcing reload.")
+                        needs_reload = True
+                        continue  # Suppress alert until verified
+                        
+                verified_alerts.append(alert)
+
+            if needs_reload:
+                # Fire and forget a hard reload
+                asyncio.create_task(bet365_scraper.force_hard_reload())
+
+            # Always broadcast alerts (even if empty) to allow frontend to clear resolved ones
+            await manager.broadcast({
+                "type": "alerts",
+                "alerts": verified_alerts
+            })
+            if verified_alerts:
+                logger.warning(f"🚨 {len(verified_alerts)} real divergence(s) detected and broadcasted!")
 
         except Exception as e:
             logger.error(f"Error in poller loop: {e}", exc_info=True)

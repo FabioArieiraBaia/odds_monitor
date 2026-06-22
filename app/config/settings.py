@@ -21,7 +21,7 @@ BETBURGER_PASSWORD = os.getenv("BETBURGER_PASSWORD", "")
 BETBURGER_HEADLESS = os.getenv("BETBURGER_HEADLESS", "True").lower() == "true"
 
 # ── Detection Thresholds ──
-FREEZE_THRESHOLD_SECONDS = float(os.getenv("FREEZE_THRESHOLD_SECONDS", 8.0))
+FREEZE_THRESHOLD_SECONDS = float(os.getenv("FREEZE_THRESHOLD_SECONDS", 15.0))
 MIN_GAME_DIFFERENCE = int(os.getenv("MIN_GAME_DIFFERENCE", 1))
 
 # ── Polling Settings ──
