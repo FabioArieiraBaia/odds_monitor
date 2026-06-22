@@ -49,8 +49,6 @@ class Bet1xScraper(BaseSource):
             "--no-default-browser-check",
             "--disable-blink-features=AutomationControlled"
         ]
-        if self.headless:
-            args.extend(["--headless=new", "--window-size=1920,1080"])
             
         logger.info("Iniciando Google Chrome real via subprocess para o 1xBet...")
         self.chrome_process = subprocess.Popen(args)
