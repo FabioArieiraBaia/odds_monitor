@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Erro de Inicialização</title>
+    <style>
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            text-align: center;
+            max-width: 600px;
+            padding: 30px;
+            background: #161b22;
+            border-radius: 12px;
+            border: 1px solid #30363d;
+        }
+        h1 { color: #ff7b72; font-size: 22px; }
+        p { color: #8b949e; font-size: 15px; line-height: 1.6; }
+        .highlight { color: #58a6ff; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⚠️ Falha Crítica ao Iniciar o Servidor</h1>
+        <p>O aplicativo não conseguiu ligar o motor de dados (Python) nos bastidores.</p>
+        <p>Isso geralmente ocorre porque um antivírus bloqueou a instalação ou faltam dependências no sistema.</p>
+        <p>Por favor, vá até a pasta de instalação do aplicativo e procure pelo arquivo <span class="highlight">python_log.txt</span> ou <span class="highlight">setup_log.txt</span>. Envie esses arquivos para o suporte.</p>
+    </div>
+</body>
+</html>

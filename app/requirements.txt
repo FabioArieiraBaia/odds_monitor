@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+playwright
+playwright-stealth
+httpx
+jinja2
+python-dotenv
+pydantic

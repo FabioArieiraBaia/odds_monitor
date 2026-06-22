@@ -1,0 +1,13 @@
+node_modules/
+chrome_data/
+chrome_data2/
+chrome_data_betburger/
+resources/app/venv/
+__pycache__/
+*.pyc
+.env
+dist/
+out/
+Gerar_Instalador_Final.bat
+*.json
+.git/index.lock

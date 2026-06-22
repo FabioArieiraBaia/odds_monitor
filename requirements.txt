@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+playwright
+websockets
+python-dotenv[cli]
+jinja2

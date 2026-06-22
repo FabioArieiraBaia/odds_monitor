@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Configurando o Sistema...</title>
+    <style>
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 6px solid #21262d;
+            border-top: 6px solid #58a6ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 30px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+        p {
+            color: #8b949e;
+            font-size: 15px;
+            text-align: center;
+            max-width: 400px;
+            line-height: 1.5;
+        }
+        .progress-text {
+            margin-top: 20px;
+            font-size: 13px;
+            color: #58a6ff;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="spinner"></div>
+    <h1>Preparando o ambiente...</h1>
+    <p>Esta é a sua primeira vez abrindo o aplicativo. Estamos baixando os motores do sistema (Python e Playwright) para o seu computador.</p>
+    <p><strong>Por favor, aguarde. Isso pode demorar de 1 a 3 minutos dependendo da sua internet.</strong></p>
+    <div class="progress-text" id="status">Iniciando instalação...</div>
+
+    <script>
+        // Optional: We can receive messages from the main process via IPC if we setup preload.js
+        // For now, a static loading screen is fine.
+        const messages = [
+            "Checando versão do Python...",
+            "Baixando dependências...",
+            "Instalando bibliotecas do sistema...",
+            "Baixando navegador invisível...",
+            "Quase pronto..."
+        ];
+        let i = 0;
+        setInterval(() => {
+            if(i < messages.length - 1) {
+                i++;
+                document.getElementById('status').innerText = messages[i];
+            }
+        }, 8000);
+    </script>
+</body>
+</html>
