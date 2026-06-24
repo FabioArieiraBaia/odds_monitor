@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const { spawn, exec, execSync } = require('child_process');
 const path = require('path');
 const net = require('net');
@@ -9,6 +9,8 @@ let mainWindow;
 let pythonProcess;
 let setupProcess;
 let isQuitting = false;
+let isPiP = false;
+let normalBounds = null;
 
 // Track Chrome debug ports used by our scrapers
 const SCRAPER_DEBUG_PORTS = [9222, 9223];
@@ -23,7 +25,8 @@ function createWindow() {
     autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
     }
   });
 
@@ -91,6 +94,32 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     require('electron').shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  ipcMain.on('toggle-pip', () => {
+    if (!mainWindow) return;
+    isPiP = !isPiP;
+    if (isPiP) {
+      normalBounds = mainWindow.getBounds();
+      mainWindow.setMinimumSize(300, 400); // Permite encolher
+      mainWindow.setAlwaysOnTop(true, 'screen-saver');
+      mainWindow.setBounds({
+        x: normalBounds.x + normalBounds.width - 380,
+        y: normalBounds.y,
+        width: 380,
+        height: 600
+      });
+      mainWindow.webContents.send('pip-status', true);
+    } else {
+      mainWindow.setAlwaysOnTop(false);
+      mainWindow.setMinimumSize(1024, 768); // Restaura tamanho mínimo
+      if (normalBounds) {
+        mainWindow.setBounds(normalBounds);
+      } else {
+        mainWindow.setSize(1280, 800);
+      }
+      mainWindow.webContents.send('pip-status', false);
+    }
   });
 
   mainWindow.on('close', function (e) {

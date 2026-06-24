@@ -1373,3 +1373,127 @@ header {
     .match-name { font-size: 11px; }
     .stat-card-value { font-size: 18px; }
 }
+
+/* ── PiP/Floating Button ── */
+.pip-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-secondary);
+    border-radius: var(--radius-md);
+    width: 38px;
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 16px;
+    transition: all var(--transition-smooth);
+}
+
+.pip-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: var(--text-primary);
+    transform: scale(1.05);
+}
+
+.pip-btn:active {
+    transform: scale(0.95);
+}
+
+/* ── Picture-in-Picture Compact Mode Styling ── */
+body.pip-mode {
+    padding: 0 !important;
+    overflow: hidden;
+    background: #0d0f14; /* Solid dark background for mini window */
+}
+
+body.pip-mode .glass-container {
+    padding: 8px !important;
+    border-radius: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+body.pip-mode header {
+    padding-bottom: 6px !important;
+    margin-bottom: 8px !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between;
+}
+
+body.pip-mode header .logo-area h1 {
+    font-size: 13px !important;
+    letter-spacing: 0.5px;
+}
+
+body.pip-mode header .logo-area .subtitle,
+body.pip-mode header .logo-icon-wrap,
+body.pip-mode header .system-status {
+    display: none !important;
+}
+
+body.pip-mode header .logo-area {
+    gap: 4px;
+}
+
+body.pip-mode .hero-stats,
+body.pip-mode .settings-panel,
+body.pip-mode .filter-toolbar,
+body.pip-mode .live-panel {
+    display: none !important;
+}
+
+body.pip-mode .dashboard-grid {
+    grid-template-columns: 1fr !important;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+body.pip-mode .alerts-panel {
+    border: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+body.pip-mode .alerts-panel .panel-header h2 {
+    font-size: 12px;
+    margin-bottom: 8px !important;
+}
+
+body.pip-mode .alerts-panel .alerts-list {
+    max-height: none !important;
+    flex: 1;
+    padding-right: 2px;
+}
+
+body.pip-mode .alert-item {
+    padding: 8px 10px !important;
+}
+
+body.pip-mode .alert-main-row {
+    font-size: 11.5px !important;
+}
+
+body.pip-mode .alert-odds-row {
+    font-size: 10.5px !important;
+}
+
+body.pip-mode .alert-time {
+    font-size: 9px !important;
+}
+

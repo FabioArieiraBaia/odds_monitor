@@ -670,6 +670,38 @@ setInterval(() => {
 }, 30000);
 
 // ════════════════════════════════════════════
+// PICTURE-IN-PICTURE (FLOAT WINDOW)
+// ════════════════════════════════════════════
+if (window.electronAPI) {
+    const pipBtn = document.getElementById('pip-btn');
+    const pipIcon = document.getElementById('pip-icon');
+    
+    if (pipBtn) {
+        pipBtn.addEventListener('click', () => {
+            window.electronAPI.togglePiP();
+        });
+    }
+    
+    window.electronAPI.onPiPStatus((isPiP) => {
+        if (isPiP) {
+            document.body.classList.add('pip-mode');
+            if (pipBtn) pipBtn.title = "Voltar ao Modo Normal";
+            if (pipIcon) pipIcon.textContent = "🗗";
+        } else {
+            document.body.classList.remove('pip-mode');
+            if (pipBtn) pipBtn.title = "Modo Compacto / Suspenso";
+            if (pipIcon) pipIcon.textContent = "🗖";
+        }
+        // Redesenha para ajustar qualquer detalhe específico
+        if (alertHistory.length > 0) renderAlerts();
+    });
+} else {
+    // Esconde o botão se não estiver rodando no Electron
+    const pipBtn = document.getElementById('pip-btn');
+    if (pipBtn) pipBtn.style.display = 'none';
+}
+
+// ════════════════════════════════════════════
 // INITIAL CONNECTION
 // ════════════════════════════════════════════
 connectWS();
