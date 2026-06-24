@@ -1,7 +1,6 @@
 node_modules/
-chrome_data/
-chrome_data2/
-chrome_data_betburger/
+chrome_data*/
+app/chrome_data*/
 resources/app/venv/
 __pycache__/
 *.pyc
@@ -9,5 +8,11 @@ __pycache__/
 dist/
 out/
 Gerar_Instalador_Final.bat
-*.json
 .git/index.lock
+*.html
+*.png
+*.txt
+venv/
+app/venv/
+.pytest_cache/
+app/.pytest_cache/

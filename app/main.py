@@ -3,6 +3,10 @@ Odds Divergence Detector — Main Application
 Real-time comparison of Bet365 and BetBurger live events using Playwright scrapers.
 Zero mock data. Everything is real.
 """
+import sys
+print(f"[DEBUG_SYS] Python Executable: {sys.executable}")
+print(f"[DEBUG_SYS] Python Version: {sys.version}")
+print(f"[DEBUG_SYS] Python Path: {sys.path}")
 import asyncio
 import atexit
 import signal
@@ -33,7 +37,7 @@ state_cache = StateCache()
 detector = DivergenceDetector(
     state_cache=state_cache,
     freeze_threshold_seconds=settings.FREEZE_THRESHOLD_SECONDS,
-    min_game_difference=999
+    min_game_difference=settings.MIN_GAME_DIFFERENCE
 )
 
 # ── Real Scrapers (NO MOCKS) ──
@@ -84,29 +88,53 @@ async def poller_loop():
     logger.info(f"   Polling interval: {settings.POLLING_INTERVAL_SECONDS}s")
     logger.info("=" * 60)
     
-    await asyncio.sleep(3)  # Warmup — let browsers launch
+    logger.info("⏳ Inicializando scrapers sequencialmente para evitar gargalos...")
+    try:
+        await bet365_scraper.start()
+    except Exception as e:
+        logger.error(f"Erro ao iniciar Bet365: {e}")
+        
+    await asyncio.sleep(2)
+    
+    try:
+        await betburger_scraper.start()
+    except Exception as e:
+        logger.error(f"Erro ao iniciar BetBurger: {e}")
+        
+    await asyncio.sleep(2)
+    
+    try:
+        await xbet_scraper.start()
+    except Exception as e:
+        logger.error(f"Erro ao iniciar 1xBet: {e}")
+
+    await asyncio.sleep(2)
+    logger.info("✅ Todos os scrapers foram inicializados!")
     
     while True:
         cycle_start = datetime.now()
         
         try:
-            # ── Fetch from both sources in parallel ──
+            # ── Fetch from BetBurger first to get the baseline surebets ──
+            try:
+                burger_events = await betburger_scraper.fetch_live_events()
+            except Exception as e:
+                logger.error(f"BetBurger scraper error: {e}")
+                burger_events = []
+            
+            # ── Then fetch from Bookmakers so their data is as fresh as possible ──
             b365_task = bet365_scraper.fetch_live_events()
-            burger_task = betburger_scraper.fetch_live_events()
             xbet_task = xbet_scraper.fetch_live_events()
             
-            results = await asyncio.gather(b365_task, burger_task, xbet_task, return_exceptions=True)
+            results = await asyncio.gather(b365_task, xbet_task, return_exceptions=True)
             
             b365_events = results[0] if not isinstance(results[0], Exception) else []
-            burger_events = results[1] if not isinstance(results[1], Exception) else []
-            xbet_events = results[2] if not isinstance(results[2], Exception) else []
+            xbet_events = results[1] if not isinstance(results[1], Exception) else []
             
             if isinstance(results[0], Exception):
                 logger.error(f"Bet365 scraper error: {results[0]}")
             if isinstance(results[1], Exception):
-                logger.error(f"BetBurger scraper error: {results[1]}")
-            if isinstance(results[2], Exception):
-                logger.error(f"1xBet scraper error: {results[2]}")
+                logger.error(f"1xBet scraper error: {results[1]}")
             
             logger.info(
                 f"📊 Cycle: Bet365={len(b365_events)} | "
@@ -170,6 +198,12 @@ async def poller_loop():
                         "surebet_percentage": burger_ev.extra_data.get("surebet_percentage", 0.0)
                     }
                     betburger_link = burger_ev.deep_link or ""
+
+                # Apply Method B fallback for UI link
+                if (not bet365_link or "EV" not in bet365_link) and burger_ev:
+                    bb_b365_link = burger_ev.extra_data.get("bet365_link")
+                    if bb_b365_link:
+                        bet365_link = bb_b365_link
                 
                 active_matches.append({
                     "id": m_id,

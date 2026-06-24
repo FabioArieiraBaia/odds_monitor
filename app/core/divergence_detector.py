@@ -178,6 +178,11 @@ class DivergenceDetector:
                 alert_id = f"surebet_{match_id}_{surebet_perc}_{burger_event.game_score}"
                 if alert_id not in self._alerted_hashes:
                     bet365_link = b365_event.deep_link or ""
+                    # Fallback to BetBurger's extracted bet365_link (Method B)
+                    if (not bet365_link or "EV" not in bet365_link) and burger_event:
+                        bb_b365_link = burger_event.extra_data.get("bet365_link")
+                        if bb_b365_link:
+                            bet365_link = bb_b365_link
                     betburger_link = burger_event.deep_link or ""
                     divergences.append({
                         "match_id": match_id,
@@ -248,8 +253,17 @@ class DivergenceDetector:
                         is_triangulated = True
 
                 # Determine Priority
+                is_golden = False
+                if burger_event.extra_data.get("is_fresh", False):
+                    b365_arrow = burger_event.extra_data.get("bet365_arrow", "none")
+                    target_arrow = burger_event.extra_data.get("target_arrow", "none")
+                    if b365_arrow in ["grey", "none"] and target_arrow in ["green", "red"]:
+                        is_golden = True
+                        
                 priority = "MEDIUM"
-                if is_triangulated:
+                if is_golden:
+                    priority = "GOLDEN"
+                elif is_triangulated:
                     priority = "CRITICAL"
                 elif is_divergent and is_frozen:
                     priority = "CRITICAL"
@@ -263,8 +277,12 @@ class DivergenceDetector:
 
                 self._alerts_cooldown[match_id] = now
 
-                # Use real deep links from scraped data
                 bet365_link = b365_event.deep_link or ""
+                # Fallback to BetBurger's extracted bet365_link (Method B)
+                if (not bet365_link or "EV" not in bet365_link) and burger_event:
+                    bb_b365_link = burger_event.extra_data.get("bet365_link")
+                    if bb_b365_link:
+                        bet365_link = bb_b365_link
                 betburger_link = burger_event.deep_link or ""
                 
                 needs_verification = bool(bet365_link and b365_event.source == "bet365")

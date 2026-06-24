@@ -18,7 +18,8 @@ class StateCache:
             best_match_id = match_id
             best_score = 0.0
             
-            if match_id not in self._cache:
+            # Always attempt fuzzy match if we don't already have a bet365 counterpart for this exact ID
+            if match_id not in self._cache or "bet365" not in self._cache.get(match_id, {}):
                 import difflib
                 
                 n2 = event.match_name.lower()

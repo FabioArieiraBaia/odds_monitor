@@ -1,6 +1,10 @@
 fastapi
-uvicorn
+uvicorn[standard]
 playwright
+playwright-stealth
 websockets
 python-dotenv[cli]
 jinja2
+beautifulsoup4
+httpx
+pydantic

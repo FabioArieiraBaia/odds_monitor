@@ -6,10 +6,10 @@ load_dotenv()
 
 # Web server settings
 HOST = os.getenv("HOST", "127.0.0.1")
-PORT = int(os.getenv("PORT", 8000))
+PORT = int(os.getenv("PORT", 8005))
 
 # ── Bet365 Settings ──
-BET365_BASE_URL = os.getenv("BET365_BASE_URL", "https://www.bet365.bet.br")
+BET365_BASE_URL = os.getenv("BET365_BASE_URL", "https://www.bet365.com")
 BET365_HEADLESS = os.getenv("BET365_HEADLESS", "True").lower() == "true"
 # Comma-separated list of sports to monitor
 BET365_SPORTS = [s.strip() for s in os.getenv("BET365_SPORTS", 

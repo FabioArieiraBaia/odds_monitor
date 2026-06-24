@@ -63,6 +63,9 @@ class Bet365Scraper(BaseSource):
     def get_name(self) -> str:
         return "bet365"
 
+    async def start(self):
+        await self._launch_browser()
+
     async def _launch_browser(self):
         """Launch a stealth Chromium browser instance using CDP to bypass anti-bot."""
         async with self._launch_lock:
@@ -80,7 +83,11 @@ class Bet365Scraper(BaseSource):
                 if not chrome_path:
                     raise FileNotFoundError("Google Chrome or Microsoft Edge not found")
                     
-                user_data_dir = os.path.join(os.getcwd(), "chrome_data")
+                local_app_data = os.environ.get('LOCALAPPDATA')
+                if local_app_data:
+                    user_data_dir = os.path.join(local_app_data, "OddsDivergenceMonitor", "chrome_data")
+                else:
+                    user_data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "chrome_data")
                 port = 9222
                 
                 logger.info("Iniciando Google Chrome real via subprocess para o Bet365...")
@@ -183,19 +190,8 @@ class Bet365Scraper(BaseSource):
         """Navigate to a specific sport's in-play page and wait for it to load."""
         url = f"{BET365_BASE}/#/IP/{sport_code}"
         try:
-            current_url = self.page.url
-            if sport_code not in current_url:
-                try:
-                    await self.page.goto(url, wait_until="commit", timeout=60000)
-                except Exception as e:
-                    if "ERR_ABORTED" not in str(e):
-                        raise
-            else:
-                try:
-                    await self.page.goto(url, wait_until="commit", timeout=60000)
-                except Exception as e:
-                    if "ERR_ABORTED" not in str(e):
-                        raise
+            logger.info(f"Navegando para {url} via page.goto...")
+            await self.page.goto(url, wait_until="commit", timeout=60000)
             
             # Map sport codes to Portuguese headers shown on bet365.bet.br
             SPORT_HEADERS = {
@@ -216,20 +212,26 @@ class Bet365Scraper(BaseSource):
                 # Wait until the URL hash matches the sport and the loader is gone
                 await self.page.wait_for_function(
                     """(args) => {
-                        const [code] = args;
-                        if (!window.location.hash.includes(code)) return false;
+                        const [code, expected_header] = args;
+                        // O hash precisa terminar exatamente com o codigo, evita que B1 passe no lugar de B13
+                        if (!window.location.hash.endsWith(code)) return false;
                         
-                        const loader = document.querySelector('.ovm-Loader, .gl-Loader');
+                        const loader = document.querySelector('.ovm-Loader, .gl-Loader, .wc-Spinner');
                         if (loader) return false;
                         
                         // Garante que o container de eventos carregou
                         const container = document.querySelector('.ipe-EventViewDetail, .ovm-Fixture, [class*="ClassificationHeader"]');
                         if (!container) return false;
                         
+                        // Verificacao de Seguranca: Garante que o esporte certo carregou na tela
+                        if (expected_header && !document.body.innerText.includes(expected_header)) {
+                            return false;
+                        }
+                        
                         return true;
                     }""",
-                    arg=[sport_code],
-                    timeout=25000
+                    arg=[sport_code, expected_header],
+                    timeout=8000
                 )
                 # Mais 1 segundo para garantir que o DOM foi populado com as odds e placares
                 await asyncio.sleep(1)
@@ -239,7 +241,7 @@ class Bet365Scraper(BaseSource):
                 if sport_code not in current_url:
                     raise TimeoutError(f"Sport page {sport_code} did not load (current URL: {current_url})")
                 logger.info(f"Page loaded, but container checks timed out. Proceeding with fallback sleep...")
-                await asyncio.sleep(10)
+                await asyncio.sleep(1)
                 
         except Exception as e:
             logger.warning(f"Navigation to {sport_code} failed: {e}")
@@ -767,11 +769,11 @@ class Bet365Scraper(BaseSource):
             # Add sport class suffix if not present
             if not re.search(r'C\d+$', ev):
                 ev += "C1"
-            return f"{BET365_BASE}/#/IP/{ev}"
+            return f"{BET365_BASE}/#/{ev}"
         
         # Fallback to sport listing page
         sport_code = SPORT_CODES.get(sport, "B13")
-        return f"{BET365_BASE}/#/IP/{sport_code}"
+        return f"{BET365_BASE}/#/{sport_code}"
     async def force_hard_reload(self):
         """Forces an immediate hard reload of the SPA to verify frozen scores."""
         now = datetime.now()

@@ -523,7 +523,8 @@ function renderAlerts() {
     alertsContainer.innerHTML = alertHistory.map(alert => {
         const emoji = getSportEmoji(alert.sport);
         const priority = alert.priority || 'HIGH';
-        const prioClass = priority === 'CRITICAL' ? 'priority-critical' :
+        const prioClass = priority === 'GOLDEN' ? 'priority-golden' :
+                         priority === 'CRITICAL' ? 'priority-critical' :
                          priority === 'HIGH' ? 'priority-high' : 'priority-medium';
 
         const bet365Url = alert.bet365_link || '#';
@@ -544,6 +545,11 @@ function renderAlerts() {
             ? `<span class="alert-diff-badge">Δ ${gameDiff} game${gameDiff > 1 ? 's' : ''}</span>`
             : '';
 
+        // Golden Badge
+        const goldenBadge = priority === 'GOLDEN'
+            ? `<div style="background: linear-gradient(45deg, #ffd700, #ffa500); color: #000; padding: 6px 10px; border-radius: 4px; font-weight: bold; margin-bottom: 8px; display: inline-block; animation: pulse 1s infinite alternate;">🔥 DELAY DE OURO CONFIRMADO!</div>`
+            : '';
+
         // Triangulation badge
         const triangulatedBadge = alert.is_triangulated 
             ? `<div style="background: #27ae60; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; margin-bottom: 8px; display: inline-block;">🎯 1XBET CONFIRMOU A VANTAGEM!</div>`
@@ -562,6 +568,7 @@ function renderAlerts() {
                     <span>🚨 DIVERGÊNCIA ${alert.sport ? '[' + alert.sport.toUpperCase() + ']' : ''}</span>
                     <span class="badge-${priority.toLowerCase()}">${priority}</span>
                 </div>
+                ${goldenBadge}
                 ${triangulatedBadge}
                 <div class="alert-match-name">${emoji} ${matchName} ${diffBadge}</div>
                 ${messageHtml}

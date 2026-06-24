@@ -34,6 +34,24 @@
         <p>O aplicativo não conseguiu ligar o motor de dados (Python) nos bastidores.</p>
         <p>Isso geralmente ocorre porque um antivírus bloqueou a instalação ou faltam dependências no sistema.</p>
         <p>Por favor, vá até a pasta de instalação do aplicativo e procure pelo arquivo <span class="highlight">python_log.txt</span> ou <span class="highlight">setup_log.txt</span>. Envie esses arquivos para o suporte.</p>
+        
+        <div id="log-container" style="display:none; text-align: left; margin-top: 20px; max-width: 100%; overflow-x: auto; background: #010409; padding: 15px; border-radius: 8px; border: 1px solid #30363d; max-height: 250px; overflow-y: auto;">
+            <h3 style="margin-top: 0; color: #ff7b72; font-size: 14px; font-family: sans-serif;">Detalhes do Erro (Logs):</h3>
+            <pre id="log-content" style="margin: 0; font-family: Consolas, 'Courier New', monospace; font-size: 12px; color: #f0f6fc; white-space: pre-wrap; word-break: break-all;"></pre>
+        </div>
     </div>
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const log = urlParams.get('log');
+        const type = urlParams.get('type');
+        if (log) {
+            document.getElementById('log-container').style.display = 'block';
+            document.getElementById('log-content').textContent = log;
+            if (type === 'setup') {
+                document.querySelector('h1').textContent = '⚠️ Falha na Configuração Inicial (Setup)';
+                document.querySelectorAll('p')[0].textContent = 'O instalador não conseguiu configurar as dependências do Python.';
+            }
+        }
+    </script>
 </body>
 </html>

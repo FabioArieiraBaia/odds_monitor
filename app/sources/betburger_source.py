@@ -16,7 +16,7 @@ from core.normalizer import NormalizedEvent
 logger = logging.getLogger(__name__)
 
 BETBURGER_BASE = "https://www.betburger.com"
-BETBURGER_LIVE_URL = f"{BETBURGER_BASE}/events/live"
+BETBURGER_LIVE_URL = f"{BETBURGER_BASE}/arbs/live"
 
 
 class BetBurgerScraper(BaseSource):
@@ -41,6 +41,9 @@ class BetBurgerScraper(BaseSource):
     def get_name(self) -> str:
         return "betburger"
 
+    async def start(self):
+        await self._launch_browser()
+
     async def _launch_browser(self):
         """Launch a real Chrome browser instance via CDP for BetBurger."""
         import subprocess
@@ -60,7 +63,11 @@ class BetBurgerScraper(BaseSource):
                     raise FileNotFoundError("Google Chrome or Microsoft Edge not found")
                 
                 # Use a different port and user data dir than Bet365 to avoid conflicts
-                user_data_dir = os.path.join(os.getcwd(), "chrome_data_betburger")
+                local_app_data = os.environ.get('LOCALAPPDATA')
+                if local_app_data:
+                    user_data_dir = os.path.join(local_app_data, "OddsDivergenceMonitor", "chrome_data_betburger")
+                else:
+                    user_data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "chrome_data_betburger")
                 port = 9223
                 
                 self.chrome_process = subprocess.Popen([
@@ -357,7 +364,13 @@ class BetBurgerScraper(BaseSource):
                             source=self.get_name(),
                             updated_at=now,
                             deep_link=f"{BETBURGER_BASE}/surebets/live",
-                            extra_data=item
+                            extra_data={
+                                "surebet_percentage": float(item.get('percent_text', '0').replace('%', '')),
+                                "is_fresh": is_fresh,
+                                "bet365_arrow": bet365_arrow,
+                                "target_arrow": target_arrow,
+                                **item
+                            }
                         ))
                     except Exception as e:
                         logger.debug(f"Error parsing JSON item: {e}")
@@ -389,11 +402,14 @@ class BetBurgerScraper(BaseSource):
                             
                             const bets = [];
                             const betWrappers = row.querySelectorAll('.bet-wrapper');
+                            let bet365_arrow = 'none';
+                            let target_arrow = 'none';
+                            
                             for (const bet of betWrappers) {
                                 const bookieEl = bet.querySelector('.bookmaker-name');
                                 const scoreEl = bet.querySelector('.bookmaker-name .current-score, .current-score');
+                                let bookmaker = '';
                                 if (bookieEl) {
-                                    let bookmaker = '';
                                     const linkSpan = bookieEl.querySelector('.link-span, span');
                                     if (linkSpan) {
                                         bookmaker = linkSpan.textContent.trim();
@@ -403,12 +419,43 @@ class BetBurgerScraper(BaseSource):
                                         if (scoreChild) scoreChild.remove();
                                         bookmaker = clone.textContent.trim();
                                     }
-                                    bets.push({
-                                        bookmaker: bookmaker,
-                                        score: scoreEl ? scoreEl.textContent.trim() : ''
-                                    });
                                 }
+                                
+                                // Look for arrows indicating odd movement
+                                let arrow = 'none';
+                                const icons = bet.querySelectorAll('i[class*="icon-arrow"], i[class*="arrow"], span[class*="arrow"]');
+                                for (const icon of icons) {
+                                    const classes = icon.className.toLowerCase();
+                                    if (classes.includes('green') || classes.includes('up') || classes.includes('success')) arrow = 'green';
+                                    else if (classes.includes('red') || classes.includes('down') || classes.includes('danger')) arrow = 'red';
+                                    else if (classes.includes('grey') || classes.includes('gray')) arrow = 'grey';
+                                }
+                                
+                                if (bookmaker.toLowerCase().includes('bet365') || bookmaker.toLowerCase().includes('1xbet')) {
+                                    if (arrow !== 'none') bet365_arrow = arrow;
+                                } else {
+                                    if (arrow !== 'none') target_arrow = arrow;
+                                }
+
+                                 const betLinkEl = bet.querySelector('a') || (bet.tagName === 'A' ? bet : null);
+                                 const betHref = betLinkEl ? betLinkEl.getAttribute('href') || '' : '';
+
+                                 bets.push({
+                                     bookmaker: bookmaker,
+                                     score: scoreEl ? scoreEl.textContent.trim() : '',
+                                     arrow: arrow,
+                                     href: betHref
+                                 });
                             }
+                            
+                            // Check if it's a fresh arb (green border)
+                            let is_fresh = false;
+                            try {
+                                const borderCol = window.getComputedStyle(row).borderColor || '';
+                                if (borderCol.includes('128, 0') || borderCol.includes('green') || row.className.includes('fresh') || row.className.includes('new')) {
+                                    is_fresh = true;
+                                }
+                            } catch(e) {}
                             
                             if (bets.length > 0) {
                                 results.push({
@@ -417,6 +464,9 @@ class BetBurgerScraper(BaseSource):
                                     percent_text: percentText,
                                     bets: bets,
                                     href: href,
+                                    is_fresh: is_fresh,
+                                    bet365_arrow: bet365_arrow,
+                                    target_arrow: target_arrow,
                                     raw_text: row.textContent || row.innerText || ''
                                 });
                             }
@@ -548,6 +598,18 @@ class BetBurgerScraper(BaseSource):
                     href = item.get('href', '')
                     deep_link = f"https://www.betburger.com{href}" if href else BETBURGER_LIVE_URL
                     
+                    # Extract Bet365 direct redirect link if present in bets
+                    bet365_link = ""
+                    for b in bets:
+                        b_bookie = b.get('bookmaker', '').lower()
+                        b_href = b.get('href', '')
+                        if '365' in b_bookie and b_href:
+                            if b_href.startswith('/'):
+                                bet365_link = f"https://www.betburger.com{b_href}"
+                            else:
+                                bet365_link = b_href
+                            break
+
                     events.append(NormalizedEvent(
                         match_id=match_id,
                         match_name=match_name,
@@ -559,8 +621,12 @@ class BetBurgerScraper(BaseSource):
                         timestamp=now,
                         deep_link=deep_link,
                         extra_data={
+                            "surebet_percentage": float(item.get('percent_text', '0').replace('%', '')),
+                            "is_fresh": item.get('is_fresh', False),
+                            "bet365_arrow": item.get('bet365_arrow', 'none'),
+                            "target_arrow": item.get('target_arrow', 'none'),
                             "raw_text": item.get('raw_text', ''),
-                            "surebet_percentage": surebet_perc,
+                            "bet365_link": bet365_link,
                             "bets": bets
                         }
                     ))
