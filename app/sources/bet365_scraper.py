@@ -112,7 +112,10 @@ class Bet365Scraper(BaseSource):
                 chrome_major = 151
                 try:
                     import subprocess
-                    out = subprocess.check_output(r'powershell -Command "(Get-Item \'C:\Program Files\Google\Chrome\Application\chrome.exe\').VersionInfo.Major"', shell=True, text=True).strip()
+                    out = subprocess.check_output(
+                        ['powershell', '-NoProfile', '-Command', '(Get-Item "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe").VersionInfo.Major'],
+                        text=True
+                    ).strip()
                     if out.isdigit():
                         chrome_major = int(out)
                 except Exception:
