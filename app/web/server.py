@@ -189,6 +189,26 @@ async def save_telegram_config(payload: TelegramConfigRequest):
         return {"status": "error", "message": str(e)}
 
 
+@app.get("/api/config/telegram")
+async def get_telegram_config():
+    from config import settings
+    return {
+        "status": "ok",
+        "chat_id": settings.TELEGRAM_CHAT_ID or "",
+        "token": settings.TELEGRAM_BOT_TOKEN or ""
+    }
+
+
+@app.get("/api/config")
+async def get_general_config():
+    from config import settings
+    return {
+        "status": "ok",
+        "email": settings.BETBURGER_EMAIL or "",
+        "password_set": bool(settings.BETBURGER_PASSWORD)
+    }
+
+
 class OpenBet365Request(BaseModel):
     match_name: str
     match_id: str = ""

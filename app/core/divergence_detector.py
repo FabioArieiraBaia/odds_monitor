@@ -100,6 +100,7 @@ class PointEventTracker:
         # Closed/alerted event keys to prevent duplicate alerts for the same point
         # Key format: f"{match_id}:{prev_state}->{new_state}"
         self._completed_event_keys: Dict[str, float] = {}
+        self._alerted_transition_keys: Set[str] = set()
 
         # Reference sources used for cross-confirmation
         self.reference_sources = ["betano", "1xbet", "betburger", "novibet"]
@@ -423,7 +424,11 @@ class PointEventTracker:
                     active_event.confidence = confidence
 
                     if confidence >= self.min_confidence_score:
-                        is_first_alert = not active_event.alert_sent
+                        trans_key = f"{match_id}:{active_event.previous_state}->{active_event.new_state}"
+                        is_first_alert = trans_key not in self._alerted_transition_keys
+                        if is_first_alert:
+                            self._alerted_transition_keys.add(trans_key)
+
                         active_event.status = EventStatus.ALERTA
                         active_event.alert_sent = True
                         active_event.alert_timestamp = now_dt.strftime("%H:%M:%S")

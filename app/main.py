@@ -431,53 +431,60 @@ async def broadcast_loop():
                 "type": "alerts",
                 "alerts": verified_alerts
             })
-            
-            # Send telegram alerts
-            if verified_alerts:
-                try:
-                    for alert in verified_alerts:
-                        if not alert.get("notify"):
-                            continue
-                        m_name = alert['match_name'].replace(" vs ", " x ").replace(" VS ", " x ")
-                        title = (
-                            "🔄 ATUALIZAÇÃO DA DIVERGÊNCIA"
-                            if alert.get("is_update")
-                            else "🚨 NOVA DIVERGÊNCIA DETECTADA"
-                        )
-                        league = (alert.get("league") or "").strip()
-                        league_line = f"🏆 <b>{league}</b>\n" if league else ""
-                        leading = alert.get("leading_houses") or []
-                        leading_line = (
-                            f"\n🔺 À frente da casa alvo: {', '.join(leading)}"
-                            if leading else ""
-                        )
-                        msg_scores = [
-                            f"🎯 <b>Bet365 (Alvo)</b>: {alert.get('bet365_score', 'não encontrado')}",
-                            f"🍔 <b>BetBurger</b>: {alert.get('betburger_score', 'não encontrado')}",
-                            f"⚡ <b>1xBet</b>: {alert.get('xbet_score', 'não encontrado')}",
-                            f"🟠 <b>Betano</b>: {alert.get('betano_score', 'não encontrado')}",
-                        ]
 
-                        msg = (
-                            f"{title}\n"
-                            f"🎯 <b>ENTRADA PARA BET365</b>\n"
-                            f"{league_line}"
-                            f"🏓 <b>{m_name}</b>\n\n"
-                            + "\n".join(msg_scores)
-                            + f"{leading_line}"
-                        )
-                        b365_btn_link = alert.get('bet365_link') or "https://www.bet365.bet.br/#/IP/B92"
-                        if alert.get('bet365_link'):
-                            msg += f"\n\n🔗 <a href='{alert['bet365_link']}'>Acessar Bet365</a>"
-                        
-                        await send_telegram_alert(msg, url_button=b365_btn_link)
-                except Exception as tg_err:
-                    logger.error(f"Erro ao enviar para o Telegram: {tg_err}")
+            # Dispatch telegram alerts
+            if verified_alerts:
+                for alert in verified_alerts:
+                    if alert.get("notify"):
+                        await format_and_send_telegram(alert)
 
         except Exception as e:
             logger.error(f"Error in broadcast loop: {e}", exc_info=True)
             
         await asyncio.sleep(1.0)
+
+
+async def format_and_send_telegram(alert: dict):
+    """Formats and dispatches full multi-house divergence alert to Telegram."""
+    from core.telegram_bot import send_telegram_alert
+    try:
+        m_name = alert['match_name'].replace(" vs ", " x ").replace(" VS ", " x ")
+        title = (
+            "🔄 ATUALIZAÇÃO DA DIVERGÊNCIA"
+            if alert.get("is_update")
+            else "🚨 NOVA DIVERGÊNCIA DETECTADA"
+        )
+        league = (alert.get("league") or "").strip()
+        league_line = f"🏆 <b>{league}</b>\n" if league else ""
+        leading = alert.get("leading_houses") or []
+        leading_line = (
+            f"\n🔺 À frente da casa alvo: {', '.join(leading)}"
+            if leading else ""
+        )
+        msg_scores = [
+            f"🎯 <b>Bet365 (Alvo)</b>: {alert.get('bet365_score', 'não encontrado')}",
+            f"🍔 <b>BetBurger</b>: {alert.get('betburger_score', 'não encontrado')}",
+            f"⚡ <b>1xBet</b>: {alert.get('xbet_score', 'não encontrado')}",
+            f"🟠 <b>Betano</b>: {alert.get('betano_score', 'não encontrado')}",
+        ]
+        if alert.get("novibet_score") and alert.get("novibet_score") != "não encontrado":
+            msg_scores.append(f"🔵 <b>Novibet</b>: {alert.get('novibet_score')}")
+
+        msg = (
+            f"{title}\n"
+            f"🎯 <b>ENTRADA PARA BET365</b>\n"
+            f"{league_line}"
+            f"🏓 <b>{m_name}</b>\n\n"
+            + "\n".join(msg_scores)
+            + f"{leading_line}"
+        )
+        b365_btn_link = alert.get('bet365_link') or "https://www.bet365.bet.br/#/IP/B92"
+        if alert.get('bet365_link'):
+            msg += f"\n\n🔗 <a href='{alert['bet365_link']}'>Acessar Bet365</a>"
+
+        await send_telegram_alert(msg, url_button=b365_btn_link)
+    except Exception as tg_err:
+        logger.error(f"Erro ao enviar para o Telegram: {tg_err}")
 
 
 # ── Global Task References for Lifecycle ──
@@ -517,6 +524,9 @@ def on_score_changed_reactive(match_id: str, source: str, event, old_ev):
                 "type": "alerts",
                 "alerts": alerts
             }))
+            for a in alerts:
+                if a.get("notify"):
+                    loop.create_task(format_and_send_telegram(a))
         except RuntimeError:
             pass
 

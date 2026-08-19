@@ -99,20 +99,26 @@ def _ensure_worker():
 
 
 async def send_telegram_alert(message: str, url_button: Optional[str] = None):
-    token = (settings.TELEGRAM_BOT_TOKEN or "").strip()
-    chat_id = (settings.TELEGRAM_CHAT_ID or "").strip()
+    import os
+    token = (os.getenv("TELEGRAM_BOT_TOKEN") or settings.TELEGRAM_BOT_TOKEN or "").strip()
+    chat_id = (os.getenv("TELEGRAM_CHAT_ID") or settings.TELEGRAM_CHAT_ID or "").strip()
     if not token or not chat_id:
+        logger.debug("[Telegram] Token ou Chat ID ausente, ignorando envio")
         return
 
     _ensure_worker()
     if _alert_queue is not None:
         try:
             _alert_queue.put_nowait((token, chat_id, message, url_button))
+            logger.info(f"📨 [Telegram] Alerta enfileirado para entrega -> Chat ID: {chat_id}")
         except asyncio.QueueFull:
             logger.warning("[Telegram] Fila de alertas cheia, descartando mensagem mais antiga")
             try:
                 _alert_queue.get_nowait()
                 _alert_queue.task_done()
+                _alert_queue.put_nowait((token, chat_id, message, url_button))
+            except Exception:
+                pass
                 _alert_queue.put_nowait((token, chat_id, message, url_button))
             except Exception:
                 pass

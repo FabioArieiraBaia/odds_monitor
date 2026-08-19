@@ -247,6 +247,27 @@ if (saveTelegramBtn && tgTokenInput && tgChatIdInput) {
     });
 }
 
+// ── Auto-load Saved Configs on Page Load ──
+async function loadSavedConfigs() {
+    try {
+        const tgRes = await fetch('/api/config/telegram');
+        const tgData = await tgRes.json();
+        if (tgData.status === 'ok') {
+            if (tgTokenInput && tgData.token) tgTokenInput.value = tgData.token;
+            if (tgChatIdInput && tgData.chat_id) tgChatIdInput.value = tgData.chat_id;
+        }
+        const bbRes = await fetch('/api/config');
+        const bbData = await bbRes.json();
+        if (bbData.status === 'ok') {
+            if (bbEmailInput && bbData.email) bbEmailInput.value = bbData.email;
+            if (bbPasswordInput && bbData.password_set) bbPasswordInput.value = "********";
+        }
+    } catch (e) {
+        console.debug('Error loading saved configs:', e);
+    }
+}
+loadSavedConfigs();
+
 // ── Scraper Toggles Handler ──
 const toggleScrapersPanel = document.getElementById('toggle-scrapers-panel');
 const scrapersPanelBody = document.getElementById('scrapers-panel-body');
