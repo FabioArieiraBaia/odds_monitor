@@ -2,8 +2,12 @@ fastapi
 uvicorn[standard]
 playwright
 playwright-stealth
-httpx
+undetected-chromedriver
+selenium
+aiohttp
+websockets
+python-dotenv[cli]
 jinja2
-python-dotenv
-pydantic
 beautifulsoup4
+httpx
+pydantic

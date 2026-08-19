@@ -22,17 +22,18 @@ class OneXBetScraper(BaseSource):
     def __init__(self):
         super().__init__()
         self._session = None
+        self._consecutive_errors = 0
 
     def get_name(self) -> str:
         return "1xbet"
 
     async def start(self):
         if not self._session or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=8, connect=4)
+            timeout = aiohttp.ClientTimeout(total=6, connect=3)
             self._session = aiohttp.ClientSession(
                 timeout=timeout,
                 headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                     "Accept": "application/json, text/plain, */*",
                 }
             )
@@ -71,10 +72,8 @@ class OneXBetScraper(BaseSource):
             set_score = f"{s1}:{s2}"
             
             # Current game score
-            # 1xBet puts period scores in PS (list of dicts)
             ps = sc.get("PS", [])
             if ps:
-                # Get the last active period
                 last_period = ps[-1]
                 val = last_period.get("Value", {})
                 p1 = val.get("S1", 0)
@@ -93,10 +92,13 @@ class OneXBetScraper(BaseSource):
         try:
             async with self._session.get(ONEXBET_API_URL) as response:
                 if response.status != 200:
-                    logger.error(f"[1xbet] API error: HTTP {response.status}")
+                    logger.warning(f"[1xbet] API error: HTTP {response.status}")
+                    self._consecutive_errors += 1
                     return []
                 
                 data = await response.json()
+                self._consecutive_errors = 0
+                now = datetime.now()
                 
                 for item in data.get("Value", []):
                     # Use O1E/O2E (English names) instead of O1/O2 (Cyrillic/local)
@@ -117,7 +119,7 @@ class OneXBetScraper(BaseSource):
                     event_id = item.get("I", "")
                     league = item.get("LE", "") or item.get("L", "")
                     
-                    deep_link = f"https://22bet.com/live/table-tennis/{event_id}"
+                    deep_link = f"https://22bet.com/live/table-tennis/{event_id}" if event_id else ""
                     
                     events.append(NormalizedEvent(
                         match_id=match_id,
@@ -128,17 +130,20 @@ class OneXBetScraper(BaseSource):
                         game_score=game_score,
                         point_score=point_score,
                         deep_link=deep_link,
-                        timestamp=datetime.now(),
+                        timestamp=now,
                         extra_data={
                             "league": league
                         }
                     ))
                     
         except asyncio.TimeoutError:
-            logger.warning("[1xbet] API timeout - reconectando...")
-            await self.stop()
-            await self.start()
+            self._consecutive_errors += 1
+            if self._consecutive_errors >= 3:
+                logger.warning("[1xbet] API timeout repetido - renovando sessão...")
+                await self.stop()
+                await self.start()
         except Exception as e:
+            self._consecutive_errors += 1
             logger.error(f"[1xbet] Error fetching events: {e}")
             
         return events

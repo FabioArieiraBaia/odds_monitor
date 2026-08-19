@@ -155,7 +155,7 @@ class BetanoScraper(BaseSource):
         options.add_argument(f"--user-data-dir={user_data_dir}")
         options.add_argument("--no-first-run")
         options.add_argument("--no-default-browser-check")
-        options.add_argument("--window-size=1366,8000")
+        options.add_argument("--window-size=1366,1200")
         options.add_argument("--lang=pt-BR")
         options.add_argument("--disable-infobars")
         options.add_argument("--disable-dev-shm-usage")
@@ -196,7 +196,7 @@ class BetanoScraper(BaseSource):
             f"--user-data-dir={user_data_dir}",
             "--no-first-run",
             "--no-default-browser-check",
-            "--window-size=1366,8000",
+            "--window-size=1366,1200",
             "--lang=pt-BR",
             "about:blank",
         ])

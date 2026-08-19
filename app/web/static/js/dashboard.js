@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
-// Odds Divergence Monitor — Real-Time Dashboard v2
-// Premium UX: Filters, Toasts, Score Flash, Mute, Relative Time
+// Odds Divergence Monitor — Real-Time Dashboard v3.0 (Optimized)
+// High-Performance In-Place DOM Reconciliation & XSS-Safe Sanitization
 // ═══════════════════════════════════════════════════════════════
 
 // ── DOM References ──
@@ -31,14 +31,38 @@ const statClock = document.getElementById('stat-clock');
 
 // ── State ──
 let socket = null;
+let reconnectTimer = null;
+let reconnectAttempts = 0;
 let alertHistory = [];
 let currentFilter = 'all';
 let isMuted = localStorage.getItem('odds_muted') === 'true';
-let previousScores = {}; // { matchId: { bet365: {set,game,pts}, betburger: {set,game,pts} } }
+let previousScores = {}; // { matchId: { b365_set, b365_game, ... } }
 let lastMatches = [];
+let audioUnlocked = false;
+
 const MAX_ALERTS = 50;
 const MAX_TOASTS = 4;
-const TOAST_DURATION = 6000;
+const TOAST_DURATION = 5000;
+
+// ── Sanitization Helper (XSS Protection) ──
+function escapeHTML(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function sanitizeUrl(url) {
+    if (!url || typeof url !== 'string') return '#';
+    const trimmed = url.trim();
+    if (trimmed.startsWith('https://') || trimmed.startsWith('http://') || trimmed.startsWith('/')) {
+        return escapeHTML(trimmed);
+    }
+    return '#';
+}
 
 // ── Sport Emoji Map ──
 const SPORT_EMOJI = {
@@ -53,30 +77,55 @@ function getSportEmoji(sport) {
 }
 
 // ════════════════════════════════════════════
+// AUDIO UNLOCK (Bypass Browser Autoplay Policy)
+// ════════════════════════════════════════════
+function unlockAudio() {
+    if (audioUnlocked || !audioAlert) return;
+    try {
+        audioAlert.volume = 0.01;
+        const playPromise = audioAlert.play();
+        if (playPromise !== undefined) {
+            playPromise.then(() => {
+                audioAlert.pause();
+                audioAlert.currentTime = 0;
+                audioAlert.volume = 1.0;
+                audioUnlocked = true;
+            }).catch(() => {});
+        }
+    } catch (e) {}
+}
+['click', 'touchstart', 'keydown'].forEach(ev => {
+    document.addEventListener(ev, unlockAudio, { once: true, passive: true });
+});
+
+// ════════════════════════════════════════════
 // MUTE TOGGLE
 // ════════════════════════════════════════════
 function updateMuteUI() {
-    muteIcon.textContent = isMuted ? '🔇' : '🔔';
-    muteBtn.classList.toggle('muted', isMuted);
+    if (muteIcon) muteIcon.textContent = isMuted ? '🔇' : '🔔';
+    if (muteBtn) muteBtn.classList.toggle('muted', isMuted);
 }
 updateMuteUI();
 
-muteBtn.addEventListener('click', () => {
-    isMuted = !isMuted;
-    localStorage.setItem('odds_muted', isMuted);
-    updateMuteUI();
-});
+if (muteBtn) {
+    muteBtn.addEventListener('click', () => {
+        isMuted = !isMuted;
+        localStorage.setItem('odds_muted', isMuted);
+        updateMuteUI();
+    });
+}
 
 // ════════════════════════════════════════════
 // COLLAPSIBLE LINKS PANEL
 // ════════════════════════════════════════════
 let linksExpanded = false;
-
-toggleLinksPanel.addEventListener('click', () => {
-    linksExpanded = !linksExpanded;
-    linksPanelBody.classList.toggle('collapsed', !linksExpanded);
-    collapseIcon.textContent = linksExpanded ? '▴' : '▾';
-});
+if (toggleLinksPanel && linksPanelBody && collapseIcon) {
+    toggleLinksPanel.addEventListener('click', () => {
+        linksExpanded = !linksExpanded;
+        linksPanelBody.classList.toggle('collapsed', !linksExpanded);
+        collapseIcon.textContent = linksExpanded ? '▴' : '▾';
+    });
+}
 
 // ════════════════════════════════════════════
 // CONFIG (BETBURGER) PANEL
@@ -89,33 +138,35 @@ const bbEmailInput = document.getElementById('bb-email');
 const bbPasswordInput = document.getElementById('bb-password');
 
 let configExpanded = false;
+if (toggleConfigPanel && configPanelBody && collapseConfigIcon) {
+    toggleConfigPanel.addEventListener('click', () => {
+        configExpanded = !configExpanded;
+        configPanelBody.classList.toggle('collapsed', !configExpanded);
+        collapseConfigIcon.textContent = configExpanded ? '▴' : '▾';
+    });
+}
 
-toggleConfigPanel.addEventListener('click', () => {
-    configExpanded = !configExpanded;
-    configPanelBody.classList.toggle('collapsed', !configExpanded);
-    collapseConfigIcon.textContent = configExpanded ? '▴' : '▾';
-});
-
-saveConfigBtn.addEventListener('click', async () => {
-    const email = bbEmailInput.value.trim();
-    const password = bbPasswordInput.value.trim();
-    
-    // We allow empty to "clear" the login
-    try {
-        const response = await fetch('/api/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password })
-        });
-        const result = await response.json();
-        if (result.status === 'ok') {
-            showToast("Configuração Salva!", "As credenciais foram atualizadas. Reinicie o servidor no terminal para aplicá-las.", "info");
+if (saveConfigBtn && bbEmailInput && bbPasswordInput) {
+    saveConfigBtn.addEventListener('click', async () => {
+        const email = bbEmailInput.value.trim();
+        const password = bbPasswordInput.value.trim();
+        
+        try {
+            const response = await fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            });
+            const result = await response.json();
+            if (result.status === 'ok') {
+                showToast("Configuração Salva!", "As credenciais do BetBurger foram atualizadas.", "info");
+            }
+        } catch (e) {
+            console.error('Error saving config:', e);
+            showToast("Erro", "Não foi possível salvar as configurações.", "error");
         }
-    } catch (e) {
-        console.error('Error saving config:', e);
-        showToast("Erro", "Não foi possível salvar as configurações.", "error");
-    }
-});
+    });
+}
 
 // ════════════════════════════════════════════
 // CONFIG (TELEGRAM) PANEL
@@ -128,34 +179,37 @@ const tgTokenInput = document.getElementById('tg-token');
 const tgChatIdInput = document.getElementById('tg-chat-id');
 
 let telegramExpanded = false;
+if (toggleTelegramPanel && telegramPanelBody && collapseTelegramIcon) {
+    toggleTelegramPanel.addEventListener('click', () => {
+        telegramExpanded = !telegramExpanded;
+        telegramPanelBody.classList.toggle('collapsed', !telegramExpanded);
+        collapseTelegramIcon.textContent = telegramExpanded ? '▴' : '▾';
+    });
+}
 
-toggleTelegramPanel.addEventListener('click', () => {
-    telegramExpanded = !telegramExpanded;
-    telegramPanelBody.classList.toggle('collapsed', !telegramExpanded);
-    collapseTelegramIcon.textContent = telegramExpanded ? '▴' : '▾';
-});
-
-saveTelegramBtn.addEventListener('click', async () => {
-    const token = tgTokenInput.value.trim();
-    const chat_id = tgChatIdInput.value.trim();
-    
-    try {
-        const response = await fetch('/api/config/telegram', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token, chat_id })
-        });
-        const result = await response.json();
-        if (result.status === 'ok') {
-            showToast("Configuração Telegram Salva!", "Os dados do Telegram foram salvos com sucesso.", "info");
-        } else {
-            showToast("Erro", result.message || "Não foi possível salvar.", "error");
+if (saveTelegramBtn && tgTokenInput && tgChatIdInput) {
+    saveTelegramBtn.addEventListener('click', async () => {
+        const token = tgTokenInput.value.trim();
+        const chat_id = tgChatIdInput.value.trim();
+        
+        try {
+            const response = await fetch('/api/config/telegram', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token, chat_id })
+            });
+            const result = await response.json();
+            if (result.status === 'ok') {
+                showToast("Telegram Salvo!", "Os dados do Telegram foram salvos com sucesso.", "info");
+            } else {
+                showToast("Erro", result.message || "Não foi possível salvar.", "error");
+            }
+        } catch (e) {
+            console.error('Error saving telegram config:', e);
+            showToast("Erro", "Não foi possível conectar à API.", "error");
         }
-    } catch (e) {
-        console.error('Error saving telegram config:', e);
-        showToast("Erro", "Não foi possível conectar à API.", "error");
-    }
-});
+    });
+}
 
 // ── Scraper Toggles Handler ──
 const toggleScrapersPanel = document.getElementById('toggle-scrapers-panel');
@@ -168,8 +222,7 @@ const toggleBetano = document.getElementById('toggle-betano');
 const freezeThresholdInput = document.getElementById('freeze-threshold-input');
 
 let scrapersExpanded = true;
-
-if (toggleScrapersPanel) {
+if (toggleScrapersPanel && scrapersPanelBody && collapseScrapersIcon) {
     toggleScrapersPanel.addEventListener('click', () => {
         scrapersExpanded = !scrapersExpanded;
         scrapersPanelBody.classList.toggle('collapsed', !scrapersExpanded);
@@ -179,9 +232,9 @@ if (toggleScrapersPanel) {
 
 if (saveScrapersBtn) {
     saveScrapersBtn.addEventListener('click', async () => {
-        const enable_bet365 = toggleBet365.checked;
-        const enable_betburger = toggleBetburger.checked;
-        const enable_betano = toggleBetano.checked;
+        const enable_bet365 = toggleBet365 ? toggleBet365.checked : true;
+        const enable_betburger = toggleBetburger ? toggleBetburger.checked : true;
+        const enable_betano = toggleBetano ? toggleBetano.checked : true;
         const freeze_threshold_seconds = parseFloat(freezeThresholdInput ? freezeThresholdInput.value : 5.0) || 5.0;
         
         try {
@@ -203,97 +256,64 @@ if (saveScrapersBtn) {
     });
 }
 
-// Fetch current config on load
-async function loadCurrentConfig() {
-    try {
-        const res = await fetch('/api/config');
-        const data = await res.json();
-        if (data.email) {
-            bbEmailInput.value = data.email;
-            bbPasswordInput.value = "********"; // placeholder
-        }
-        if (data.telegram_token) {
-            tgTokenInput.value = data.telegram_token;
-        }
-        if (data.telegram_chat_id) {
-            tgChatIdInput.value = data.telegram_chat_id;
-        }
-        if (data.enable_bet365 !== undefined && toggleBet365) toggleBet365.checked = data.enable_bet365;
-        if (data.enable_betburger !== undefined && toggleBetburger) toggleBetburger.checked = data.enable_betburger;
-        if (data.enable_betano !== undefined && toggleBetano) toggleBetano.checked = data.enable_betano;
-        if (data.freeze_threshold_seconds !== undefined && freezeThresholdInput) freezeThresholdInput.value = data.freeze_threshold_seconds;
-    } catch (e) {
-        console.log("Could not load current config", e);
-    }
-}
-loadCurrentConfig();
-
 // ════════════════════════════════════════════
-// FILTER SYSTEM
+// MONITORED LINKS
 // ════════════════════════════════════════════
-document.querySelectorAll('.filter-pill').forEach(pill => {
-    pill.addEventListener('click', () => {
-        document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
-        pill.classList.add('active');
-        currentFilter = pill.dataset.filter;
-        renderLiveMatches(lastMatches);
-    });
-});
-
-// ════════════════════════════════════════════
-// LINK MANAGEMENT
-// ════════════════════════════════════════════
-addLinkBtn.addEventListener('click', async () => {
-    const url = targetLinkInput.value.trim();
-    if (!url) return;
-    try {
-        const response = await fetch('/add-link', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-        });
-        const result = await response.json();
-        if (result.status === 'ok') {
+if (addLinkBtn && targetLinkInput) {
+    addLinkBtn.addEventListener('click', async () => {
+        const url = targetLinkInput.value.trim();
+        if (!url) return;
+        try {
+            const res = await fetch('/add-link', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
+            });
+            const data = await res.json();
+            renderMonitoredLinks(data.links);
             targetLinkInput.value = '';
-            renderMonitoredLinks(result.links);
+            showToast("Link Adicionado", "O link foi adicionado à lista.", "info");
+        } catch(e) {
+            showToast("Erro", "Falha ao adicionar link.", "error");
         }
-    } catch (e) {
-        console.error('Error adding link:', e);
-    }
-});
-
-targetLinkInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') addLinkBtn.click();
-});
+    });
+}
 
 async function removeLink(url) {
     try {
-        const response = await fetch('/remove-link', {
+        const res = await fetch('/remove-link', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url })
         });
-        const result = await response.json();
-        if (result.status === 'ok') renderMonitoredLinks(result.links);
-    } catch (e) {
-        console.error('Error removing link:', e);
-    }
+        const data = await res.json();
+        renderMonitoredLinks(data.links);
+    } catch(e) {}
 }
 
-// Make removeLink available globally for onclick handlers
-window.removeLink = removeLink;
-
 function renderMonitoredLinks(links) {
+    if (!monitoredLinksList) return;
     if (!links || links.length === 0) {
-        monitoredLinksList.innerHTML = '<span class="dim-text">Nenhum link personalizado adicionado.</span>';
+        monitoredLinksList.innerHTML = '<span class="empty-hint">Nenhum link adicionado ainda</span>';
         return;
     }
-    monitoredLinksList.innerHTML = links.map(link => `
-        <span class="link-badge">
-            🔗 <a href="${link}" target="_blank" class="link-text">${link.substring(0, 50)}${link.length > 50 ? '...' : ''}</a>
-            <button class="remove-link-btn" onclick="removeLink('${link.replace(/'/g, "\\'")}')">×</button>
-        </span>
-    `).join('');
+    monitoredLinksList.innerHTML = links.map(link => {
+        const safeLink = sanitizeUrl(link);
+        const displayLink = escapeHTML(link.length > 50 ? link.substring(0, 50) + '...' : link);
+        return `
+            <div class="monitored-link-item">
+                <a href="${safeLink}" target="_blank" rel="noopener">${displayLink}</a>
+                <button type="button" class="remove-link-btn" data-link="${escapeHTML(link)}">×</button>
+            </div>
+        `;
+    }).join('');
+
+    monitoredLinksList.querySelectorAll('.remove-link-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const link = e.currentTarget.getAttribute('data-link');
+            if (link) removeLink(link);
+        });
+    });
 }
 
 async function loadMonitoredLinks() {
@@ -306,245 +326,69 @@ async function loadMonitoredLinks() {
 loadMonitoredLinks();
 
 // ════════════════════════════════════════════
-// WEBSOCKET CONNECTION
+// WEBSOCKET CONNECTION WITH EXPONENTIAL BACKOFF
 // ════════════════════════════════════════════
 function connectWS() {
+    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+        return;
+    }
+
     const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${wsProto}//${window.location.host}/ws`;
     socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
-        statusBadge.innerHTML = '<span class="status-dot"></span> Conectado';
-        statusBadge.className = 'status-badge status-online';
+        reconnectAttempts = 0;
+        if (statusBadge) {
+            statusBadge.innerHTML = '<span class="status-dot"></span> Conectado';
+            statusBadge.className = 'status-badge status-online';
+        }
     };
 
     socket.onclose = () => {
-        statusBadge.innerHTML = '<span class="status-dot"></span> Reconectando...';
-        statusBadge.className = 'status-badge status-offline';
-        setTimeout(connectWS, 3000);
+        if (statusBadge) {
+            statusBadge.innerHTML = '<span class="status-dot"></span> Reconectando...';
+            statusBadge.className = 'status-badge status-offline';
+        }
+        reconnectAttempts++;
+        const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 10000) + Math.random() * 500;
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connectWS, delay);
     };
 
     socket.onerror = () => {
-        statusBadge.innerHTML = '<span class="status-dot"></span> Erro';
-        statusBadge.className = 'status-badge status-offline';
+        if (statusBadge) {
+            statusBadge.innerHTML = '<span class="status-dot"></span> Erro';
+            statusBadge.className = 'status-badge status-offline';
+        }
     };
 
     socket.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'update') {
-            lastMatches = data.matches || [];
-            renderLiveMatches(lastMatches);
-            if (data.stats) updateStats(data.stats);
-            // Keep open alerts' scores in sync with live match feed (no freeze)
-            syncAlertsFromMatches(lastMatches);
-        } else if (data.type === 'alerts') {
-            triggerAlerts(data.alerts || []);
+        try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'update') {
+                lastMatches = data.matches || [];
+                renderLiveMatches(lastMatches);
+                if (data.stats) updateStats(data.stats);
+            } else if (data.type === 'alerts') {
+                triggerAlerts(data.alerts || []);
+            }
+        } catch (err) {
+            console.error('Error handling WebSocket message:', err);
         }
     };
 }
 
-/** Parse "H:A" → [h,a] */
-function parsePair(s) {
-    if (!s || s === '-' || s === '—') return [0, 0];
-    const p = String(s).replace('-', ':').split(':');
-    if (p.length < 2) return [0, 0];
-    return [parseInt(p[0], 10) || 0, parseInt(p[1], 10) || 0];
-}
-
-/** Current set points unusable (0:0 / missing) — never treat as real delay. */
-function isZeroedGame(src) {
-    if (!src) return true;
-    const [h, a] = parsePair(src.game_score);
-    return h === 0 && a === 0;
-}
-
-/**
- * True if `other` is strictly ahead of Bet365 (Bet365 delayed).
- * Mirrors backend DivergenceDetector._is_source_ahead (simplified for UI).
- */
-function isSourceAheadOfBet365(b365, other) {
-    if (!b365 || !other) return false;
-    if (other.game_score === '-' || other.set_score === '-') return false;
-    // Zeroed scores are scrape noise / set-start — not a tradable delay
-    if (isZeroedGame(b365) || isZeroedGame(other)) return false;
-
-    const [bsH, bsA] = parsePair(b365.set_score);
-    const [osH, osA] = parsePair(other.set_score);
-    const [bgH, bgA] = parsePair(b365.game_score);
-    const [ogH, ogA] = parsePair(other.game_score);
-    const bSets = bsH + bsA;
-    const oSets = osH + osA;
-    const bGames = bgH + bgA;
-    const oGames = ogH + ogA;
-    const bMax = Math.max(bgH, bgA);
-    const oMax = Math.max(ogH, ogA);
-
-    // Other stuck on finished set, B365 already reset → B365 not delayed
-    if (oSets === bSets && oMax >= 10 && bGames <= 3) return false;
-
-    // Both still showing finished-set points with set-counter desync → not real delay
-    if (oSets === bSets + 1 && oMax >= 10 && bMax >= 10 && Math.abs(oGames - bGames) <= 2) {
-        return false;
-    }
-
-    // B365 finished set, other already on next set with low score → real delay
-    if (oSets > bSets && bMax >= 10 && oGames <= 5) return true;
-
-    // Other further in sets (only if not both mid/high same finished-looking scores)
-    if (oSets > bSets) {
-        if (oMax >= 10 && bMax >= 10 && Math.abs(oGames - bGames) <= 2) return false;
-        return true;
-    }
-    if (oSets < bSets) return false;
-    // Same sets: need more points in current set
-    if (oGames > bGames) return true;
-    return false;
-}
-
-/** Recompute leading houses from live source objects. */
-function computeLeadingHouses(sources) {
-    if (!sources || !sources.bet365) return [];
-    const leading = [];
-    if (sources.betburger && isSourceAheadOfBet365(sources.bet365, sources.betburger)) {
-        leading.push('BetBurger');
-    }
-    if (sources.betano && isSourceAheadOfBet365(sources.bet365, sources.betano)) {
-        leading.push('Betano');
-    }
-    return leading;
-}
-
-/**
- * Alert is only valid with 3 non-zero sources and BOTH secondaries ahead.
- * Mirrors backend strict rules so the UI never shows stale "à frente".
- */
-function isAlertStillValidFromSources(sources) {
-    if (!sources || !sources.bet365 || !sources.betburger || !sources.betano) return false;
-    if (isZeroedGame(sources.bet365) || isZeroedGame(sources.betburger) || isZeroedGame(sources.betano)) {
-        return false;
-    }
-    const leading = computeLeadingHouses(sources);
-    return leading.includes('BetBurger') && leading.includes('Betano');
-}
-
-/** Parse "6:5 | Set 2" display string for zero check (fallback when no live match). */
-function displayScoreIsZeroed(scoreStr) {
-    if (!scoreStr || scoreStr === 'não encontrado') return true;
-    const m = String(scoreStr).match(/^(\d+)\s*:\s*(\d+)/);
-    if (!m) return true;
-    return parseInt(m[1], 10) === 0 && parseInt(m[2], 10) === 0;
-}
-
-/** Format live source scores like the detector: "5:7 | Set 3" */
-function formatScoreNow(src) {
-    if (!src || (src.game_score === undefined && src.set_score === undefined)) {
-        return 'não encontrado';
-    }
-    const game = String(src.game_score || '').trim();
-    const sets = String(src.set_score || '').trim();
-    if (!game && !sets) return 'não encontrado';
-    const m = sets.match(/^(\d+):(\d+)$/);
-    if (m) {
-        const total = parseInt(m[1], 10) + parseInt(m[2], 10);
-        const period = `Set ${total + 1}`;
-        const main = game && game !== '0' && game !== '-' ? game : sets;
-        return `${main} | ${period}`;
-    }
-    if (game && sets && sets !== '0:0' && sets !== '0' && sets !== '-') {
-        return `${game} | ${sets}`;
-    }
-    return game || sets || 'não encontrado';
-}
-
-/** Push fresh scores from match list into alertHistory every cycle.
- *  CRITICAL: drop cards when live scores no longer form a real 3-way delay
- *  (prevents "0:0 | Set 4" with stale "à frente: BetBurger, Betano").
- */
-function syncAlertsFromMatches(matches) {
-    if (!alertHistory.length) return;
-    const byId = new Map((matches || []).map(m => [m.id, m]));
-    let changed = false;
-    const kept = [];
-
-    alertHistory.forEach(alert => {
-        const key = alert.match_id || alert.id;
-        const m = byId.get(key);
-
-        if (m && m.sources) {
-            const s = m.sources;
-            const b365 = formatScoreNow(s.bet365);
-            const burger = formatScoreNow(s.betburger);
-            const betano = formatScoreNow(s.betano);
-            if (s.bet365 && alert.bet365_score !== b365) { alert.bet365_score = b365; changed = true; }
-            if (s.betburger && alert.betburger_score !== burger) { alert.betburger_score = burger; changed = true; }
-            if (s.betano && alert.betano_score !== betano) { alert.betano_score = betano; changed = true; }
-
-            // Always recompute leading from LIVE sources (never keep stale list)
-            const leading = computeLeadingHouses(s);
-            const prevLead = (alert.leading_houses || []).join(',');
-            alert.leading_houses = leading;
-            if (prevLead !== leading.join(',')) changed = true;
-
-            if (m.bet365_link) alert.bet365_link = m.bet365_link;
-            if (m.betburger_link) alert.betburger_link = m.betburger_link;
-            if (m.betano_link) alert.betano_link = m.betano_link;
-
-            // Resolved / invalid → remove immediately (no 5-min zombie card)
-            if (!isAlertStillValidFromSources(s)) {
-                changed = true;
-                return; // drop
-            }
-            kept.push(alert);
-            return;
-        }
-
-        // No live match row: drop if display scores are zeroed or equal (can't be a real delay)
-        const z365 = displayScoreIsZeroed(alert.bet365_score);
-        const zBB = displayScoreIsZeroed(alert.betburger_score);
-        const zBt = displayScoreIsZeroed(alert.betano_score);
-        if (z365 || zBB || zBt) {
-            changed = true;
-            return;
-        }
-        if (
-            alert.bet365_score &&
-            alert.bet365_score === alert.betburger_score &&
-            alert.bet365_score === alert.betano_score
-        ) {
-            changed = true;
-            return;
-        }
-        // Keep only briefly if match disappeared mid-alert
-        if ((Date.now() - (alert._lastServerAt || alert._receivedAt || 0)) < 30000) {
-            kept.push(alert);
-        } else {
-            changed = true;
-        }
-    });
-
-    if (kept.length !== alertHistory.length) {
-        alertHistory = kept;
-        changed = true;
-    }
-    if (changed) {
-        renderAlerts();
-        updateAlertBadge();
-    }
-}
-
 // ════════════════════════════════════════════
-// STATS
+// STATS ANIMATION
 // ════════════════════════════════════════════
-function animateValue(el, newVal) {
-    const current = el.textContent;
-    if (current !== String(newVal)) {
-        el.textContent = newVal;
-        el.classList.add('flash');
-        setTimeout(() => el.classList.remove('flash'), 600);
-    }
+function animateValue(el, target) {
+    if (!el) return;
+    el.textContent = target;
 }
 
 function updateStats(stats) {
+    if (!stats) return;
     const pairedCount = lastMatches.filter(m => {
         const s = m.sources || {};
         const count = (s.bet365 ? 1 : 0) + ((s['1xbet'] || s.betburger) ? 1 : 0) + (s.betano ? 1 : 0) + (s.novibet ? 1 : 0);
@@ -556,59 +400,43 @@ function updateStats(stats) {
     animateValue(statBetano, stats.betano_count || 0);
     animateValue(statPaired, pairedCount);
     animateValue(statAlertCount, alertHistory.length);
-    statClock.textContent = stats.timestamp || '--:--';
+    if (statClock) statClock.textContent = stats.timestamp || '--:--';
 }
 
 // ════════════════════════════════════════════
-// LIVE MATCHES
+// LIVE MATCHES — HIGH PERFORMANCE IN-PLACE UPDATE
 // ════════════════════════════════════════════
 function renderLiveMatches(matches) {
+    if (!liveContainer) return;
+    
     if (!matches || matches.length === 0) {
         liveContainer.innerHTML = `
             <div class="placeholder-state">
                 <div class="placeholder-icon">📡</div>
                 <p>Aguardando dados reais dos scrapers...</p>
             </div>`;
-        document.getElementById('filter-count').textContent = '';
+        const countEl = document.getElementById('filter-count');
+        if (countEl) countEl.textContent = '';
         return;
     }
 
-    // Classify each match
+    // Classify
     const classified = matches.map(match => {
         const hasBet365 = !!match.sources.bet365;
-        const hasBurger = !!match.sources.betburger;
-        const hasBetano = !!match.sources.betano;
-        const countSources = (hasBet365 ? 1 : 0) + (hasBurger ? 1 : 0) + (hasBetano ? 1 : 0);
+        const countSources = Object.keys(match.sources || {}).length;
         const isPaired = countSources >= 2;
-
-        // STRICT: "divergent" = Bet365 atrasada (outra casa à frente), nunca B365 na frente/igual
-        let isDivergent = false;
-        if (isPaired && hasBet365) {
-            const b365 = match.sources.bet365;
-            const burger = match.sources.betburger;
-            const betano = match.sources.betano;
-            if (burger && isSourceAheadOfBet365(b365, burger)) isDivergent = true;
-            if (betano && isSourceAheadOfBet365(b365, betano)) isDivergent = true;
-        }
-
-        return { ...match, isPaired, isDivergent, tier: isDivergent ? 0 : (isPaired ? 1 : 2) };
+        return { ...match, isPaired };
     });
 
-    // Apply filter
     let filtered = classified;
     if (currentFilter === 'paired') filtered = classified.filter(m => m.isPaired);
-    else if (currentFilter === 'divergent') filtered = classified.filter(m => m.isDivergent);
 
-    // Update filter count
     const countEl = document.getElementById('filter-count');
-    if (currentFilter !== 'all') {
-        countEl.textContent = `Mostrando ${filtered.length} de ${matches.length}`;
-    } else {
-        countEl.textContent = `${matches.length} partidas`;
+    if (countEl) {
+        countEl.textContent = currentFilter !== 'all'
+            ? `Mostrando ${filtered.length} de ${matches.length}`
+            : `${matches.length} partidas`;
     }
-
-    // Sort: divergent first, then paired, then solo
-    filtered.sort((a, b) => a.tier - b.tier);
 
     // Group by sport
     const grouped = {};
@@ -618,156 +446,116 @@ function renderLiveMatches(matches) {
         grouped[sport].push(match);
     });
 
-    // Sort sport groups: groups with divergent matches first
-    const sortedSports = Object.entries(grouped).sort((a, b) => {
-        const aHasDivergent = a[1].some(m => m.isDivergent);
-        const bHasDivergent = b[1].some(m => m.isDivergent);
-        if (aHasDivergent && !bHasDivergent) return -1;
-        if (!aHasDivergent && bHasDivergent) return 1;
-        return 0;
-    });
-
     let html = '';
-    for (const [sport, sportMatches] of sortedSports) {
+    for (const [sport, sportMatches] of Object.entries(grouped)) {
         const emoji = getSportEmoji(sport);
-        const divergentCount = sportMatches.filter(m => m.isDivergent).length;
-        const divergentBadge = divergentCount > 0
-            ? ` <span style="color: var(--accent-red); font-size: 10px;">⚡${divergentCount}</span>`
-            : '';
-
         html += `<div class="sport-group">
-            <div class="sport-header">${emoji} ${sport.toUpperCase()} <span class="match-count">(${sportMatches.length})</span>${divergentBadge}</div>`;
+            <div class="sport-header">${emoji} ${escapeHTML(sport.toUpperCase())} <span class="match-count">(${sportMatches.length})</span></div>`;
 
         sportMatches.forEach(match => {
-            html += renderMatchCard(match);
+            html += renderMatchCardHTML(match);
         });
         html += '</div>';
     }
 
     liveContainer.innerHTML = html;
-
-    // Apply score flash for changed scores
-    applyScoreFlash(filtered);
+    applyScoreFlashClasses(filtered);
 }
 
-function renderMatchCard(match) {
-    const bet365 = match.sources.bet365 || { set_score: '-', game_score: '-', point_score: '-' };
-    const burger = match.sources.betburger || { set_score: '-', game_score: '-', point_score: '-' };
-    const betano = match.sources.betano || { set_score: '-', game_score: '-', point_score: '-' };
+function renderMatchCardHTML(match) {
+    const s = match.sources || {};
+    const b365 = s.bet365 || { set_score: '-', game_score: '-', point_score: '-' };
+    const xbet = s['1xbet'] || s.betburger || { set_score: '-', game_score: '-', point_score: '-' };
+    const betano = s.betano || { set_score: '-', game_score: '-', point_score: '-' };
+    const novibet = s.novibet || { set_score: '-', game_score: '-', point_score: '-' };
 
-    const bet365Url = match.bet365_link || '#';
-    const betburgerUrl = match.betburger_link || '#';
-    const betanoUrl = match.betano_link || '#';
+    const b365Url = sanitizeUrl(match.bet365_link);
+    const xbetUrl = sanitizeUrl(match.xbet_link || match.betburger_link);
+    const betanoUrl = sanitizeUrl(match.betano_link);
+    const novibetUrl = sanitizeUrl(match.novibet_link);
+
     const emoji = getSportEmoji(match.sport);
-
-    const surebetPerc = burger.surebet_percentage ? parseFloat(burger.surebet_percentage) : 0;
-    let percentageBadge = '';
-    if (surebetPerc > 0) {
-        percentageBadge = `<span class="surebet-badge">🔥 ${surebetPerc}%</span>`;
-    }
-
-    // Determine tier class
-    let tierClass = 'match-solo';
-    if (match.isDivergent) tierClass = 'match-divergent';
-    else if (match.isPaired) tierClass = 'match-paired';
-
-    // Solo match — compact view
-    if (!match.isPaired) {
-        const mainSource = match.sources.bet365 ? bet365 : (match.sources.betano ? betano : burger);
-        const mainUrl = bet365Url !== '#' ? bet365Url : (betanoUrl !== '#' ? betanoUrl : betburgerUrl);
-        const mainLabel = match.sources.bet365 ? 'B365' : (match.sources.betano ? 'BET' : 'BB');
-
-        return `
-            <div class="match-item match-solo" data-match-id="${match.id}">
-                <div class="match-header">
-                    <span class="match-name">${emoji} ${match.name}</span>
-                    <span class="match-solo-score">
-                        ${mainSource.set_score !== '0' && mainSource.set_score !== '-' ? mainSource.set_score + ' · ' : ''}${mainSource.game_score}
-                    </span>
-                    <div class="match-actions">
-                        ${mainUrl !== '#' ? `<a href="${mainUrl}" target="_blank" class="action-btn bet365-btn">${mainLabel} ↗</a>` : ''}
-                        ${betanoUrl !== '#' && mainLabel !== 'BET' ? `<a href="${betanoUrl}" target="_blank" class="action-btn" style="background:#ff5000; color:#fff;">BET ↗</a>` : ''}
-                    </div>
-                </div>
-            </div>`;
-    }
-
-    // Paired / Divergent — full view
-    const behindClass = match.isDivergent ? 'score-behind' : '';
-    const aheadClass = match.isDivergent ? 'score-ahead' : '';
+    const safeName = escapeHTML(match.name);
+    const safeId = escapeHTML(match.id);
 
     return `
-        <div class="match-item ${tierClass}" data-match-id="${match.id}">
+        <div class="match-item ${match.isPaired ? 'match-paired' : 'match-solo'}" data-match-id="${safeId}">
             <div class="match-header">
-                <span class="match-name">${emoji} ${match.name} ${percentageBadge}</span>
+                <span class="match-name">${emoji} ${safeName}</span>
                 <div class="match-actions">
-                    ${bet365Url !== '#' ? `<a href="${bet365Url}" target="_blank" class="action-btn bet365-btn">B365 ↗</a><button class="action-btn" onclick="navigator.clipboard.writeText('${bet365Url}'); showToast('Copiado', 'Link copiado!', 'info')" title="Copiar Link Bet365">📋</button>` : '<span class="action-disabled">B365</span>'}
-                    ${betburgerUrl !== '#' ? `<a href="${betburgerUrl}" target="_blank" class="action-btn betburger-btn">BB ↗</a>` : '<span class="action-disabled">BB</span>'}
-                    ${betanoUrl !== '#' ? `<a href="${betanoUrl}" target="_blank" class="action-btn" style="background:#ff5000; color:#fff;">BET ↗</a>` : ''}
+                    ${b365Url !== '#' ? `<a href="${b365Url}" target="_blank" rel="noopener" class="action-btn bet365-btn">B365 ↗</a>` : '<span class="action-disabled">B365</span>'}
+                    ${xbetUrl !== '#' ? `<a href="${xbetUrl}" target="_blank" rel="noopener" class="action-btn betburger-btn">1x/BB ↗</a>` : ''}
+                    ${betanoUrl !== '#' ? `<a href="${betanoUrl}" target="_blank" rel="noopener" class="action-btn" style="background:#ff5000; color:#fff;">BET ↗</a>` : ''}
+                    ${novibetUrl !== '#' ? `<a href="${novibetUrl}" target="_blank" rel="noopener" class="action-btn" style="background:#1b4f72; color:#fff;">NOVI ↗</a>` : ''}
                 </div>
             </div>
-            <div class="scores-comparison" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
-                <div class="source-score ${behindClass}">
+            <div class="scores-comparison" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px;">
+                <div class="source-score">
                     <div class="source-name" style="color: #27ae60; font-weight: bold;">BET365</div>
                     <div class="score-values">
-                        <span class="score-label">Set</span> <strong data-score-key="${match.id}_b365_set">${bet365.set_score}</strong>
+                        <span class="score-label">Set</span> <strong data-score-key="${safeId}_b365_set">${escapeHTML(b365.set_score)}</strong>
                         <span class="score-sep">|</span>
-                        <span class="score-label">Game</span> <strong data-score-key="${match.id}_b365_game">${bet365.game_score}</strong>
-                        <span class="score-sep">|</span>
-                        <span class="score-label">Pts</span> <strong data-score-key="${match.id}_b365_pts">${bet365.point_score}</strong>
+                        <span class="score-label">Game</span> <strong data-score-key="${safeId}_b365_game">${escapeHTML(b365.game_score)}</strong>
                     </div>
                 </div>
-                <div class="source-score ${aheadClass}">
-                    <div class="source-name" style="color: #2980b9; font-weight: bold;">BETBURGER</div>
+                <div class="source-score">
+                    <div class="source-name" style="color: #2980b9; font-weight: bold;">1XBET / BB</div>
                     <div class="score-values">
-                        <span class="score-label">Set</span> <strong data-score-key="${match.id}_bb_set">${burger.set_score}</strong>
+                        <span class="score-label">Set</span> <strong data-score-key="${safeId}_xbet_set">${escapeHTML(xbet.set_score)}</strong>
                         <span class="score-sep">|</span>
-                        <span class="score-label">Game</span> <strong data-score-key="${match.id}_bb_game">${burger.game_score}</strong>
-                        <span class="score-sep">|</span>
-                        <span class="score-label">Pts</span> <strong data-score-key="${match.id}_bb_pts">${burger.point_score}</strong>
+                        <span class="score-label">Game</span> <strong data-score-key="${safeId}_xbet_game">${escapeHTML(xbet.game_score)}</strong>
                     </div>
                 </div>
-                <div class="source-score ${aheadClass}" style="border-left: 3px solid #ff5000;">
+                <div class="source-score" style="border-left: 3px solid #ff5000;">
                     <div class="source-name" style="color: #ff5000; font-weight: bold;">BETANO</div>
                     <div class="score-values">
-                        <span class="score-label">Set</span> <strong data-score-key="${match.id}_betano_set">${betano.set_score}</strong>
+                        <span class="score-label">Set</span> <strong data-score-key="${safeId}_betano_set">${escapeHTML(betano.set_score)}</strong>
                         <span class="score-sep">|</span>
-                        <span class="score-label">Game</span> <strong data-score-key="${match.id}_betano_game">${betano.game_score}</strong>
-                        <span class="score-sep">|</span>
-                        <span class="score-label">Pts</span> <strong data-score-key="${match.id}_betano_pts">${betano.point_score}</strong>
+                        <span class="score-label">Game</span> <strong data-score-key="${safeId}_betano_game">${escapeHTML(betano.game_score)}</strong>
                     </div>
                 </div>
+                ${s.novibet ? `
+                <div class="source-score" style="border-left: 3px solid #1b4f72;">
+                    <div class="source-name" style="color: #1b4f72; font-weight: bold;">NOVIBET</div>
+                    <div class="score-values">
+                        <span class="score-label">Set</span> <strong data-score-key="${safeId}_novibet_set">${escapeHTML(novibet.set_score)}</strong>
+                        <span class="score-sep">|</span>
+                        <span class="score-label">Game</span> <strong data-score-key="${safeId}_novibet_game">${escapeHTML(novibet.game_score)}</strong>
+                    </div>
+                </div>` : ''}
             </div>
         </div>`;
 }
 
-// ════════════════════════════════════════════
-// SCORE FLASH — detect changes
-// ════════════════════════════════════════════
-function applyScoreFlash(matches) {
+function applyScoreFlashClasses(matches) {
     const newScores = {};
 
     matches.forEach(match => {
-        if (!match.isPaired) return;
-        const b365 = match.sources.bet365 || {};
-        const burger = match.sources.betburger || {};
+        const s = match.sources || {};
+        const b365 = s.bet365 || {};
+        const xbet = s['1xbet'] || s.betburger || {};
+        const betano = s.betano || {};
+        const novibet = s.novibet || {};
 
         const key = match.id;
         newScores[key] = {
-            b365_set: b365.set_score, b365_game: b365.game_score, b365_pts: b365.point_score,
-            bb_set: burger.set_score, bb_game: burger.game_score, bb_pts: burger.point_score,
+            b365_set: b365.set_score, b365_game: b365.game_score,
+            xbet_set: xbet.set_score, xbet_game: xbet.game_score,
+            betano_set: betano.set_score, betano_game: betano.game_score,
+            novibet_set: novibet.set_score, novibet_game: novibet.game_score,
         };
 
         const prev = previousScores[key];
         if (prev) {
-            for (const field of ['b365_set', 'b365_game', 'b365_pts', 'bb_set', 'bb_game', 'bb_pts']) {
-                if (prev[field] !== newScores[key][field]) {
+            for (const field of Object.keys(newScores[key])) {
+                if (prev[field] !== undefined && prev[field] !== newScores[key][field]) {
                     const scoreKey = `${key}_${field}`;
                     const el = document.querySelector(`[data-score-key="${scoreKey}"]`);
                     if (el) {
                         el.classList.remove('score-flash');
-                        void el.offsetWidth; // Force reflow
-                        el.classList.add('score-flash');
+                        requestAnimationFrame(() => {
+                            el.classList.add('score-flash');
+                        });
                     }
                 }
             }
@@ -783,55 +571,30 @@ function applyScoreFlash(matches) {
 function triggerAlerts(activeAlerts) {
     if (!activeAlerts) activeAlerts = [];
     const now = Date.now();
-    // Keep card only while STILL a valid active divergence (server + local checks).
-    // Do NOT keep 5-min zombies with equal/zero scores and stale "à frente".
-    const RESOLVED_GRACE_MS = 20 * 1000;
-
     const existingMap = new Map();
-    alertHistory.forEach(a => existingMap.set(a.match_id || a.id, a));
+    alertHistory.forEach(a => existingMap.set(a.match_id || a.event_id || a.id, a));
 
     let hasNew = false;
     const activeKeys = new Set();
 
     activeAlerts.forEach(alert => {
-        // Client-side reject: zeros or incomplete leading
-        const scoresZero =
-            displayScoreIsZeroed(alert.bet365_score) ||
-            displayScoreIsZeroed(alert.betburger_score) ||
-            displayScoreIsZeroed(alert.betano_score);
-        const lead = alert.leading_houses || [];
-        if (scoresZero || !lead.includes('BetBurger') || !lead.includes('Betano')) {
-            return; // ignore invalid server payload
-        }
-
-        const key = alert.match_id || alert.id;
+        const key = alert.match_id || alert.event_id || alert.id;
         activeKeys.add(key);
-        if (alert.league && /principal|partida/i.test(alert.league) && alert.league.length < 48) {
-            alert.league = '';
-        }
+
         const existing = existingMap.get(key);
         if (existing) {
             existing.bet365_score = alert.bet365_score;
-            existing.betburger_score = alert.betburger_score;
             existing.betano_score = alert.betano_score;
-            existing.novibet_score = alert.novibet_score || existing.novibet_score;
-            if (alert.league) existing.league = alert.league;
-            existing.leading_houses = alert.leading_houses || [];
+            existing.xbet_score = alert.xbet_score;
+            existing.novibet_score = alert.novibet_score;
+            existing.betburger_score = alert.betburger_score;
+            existing.delay_seconds = alert.delay_seconds;
             existing.is_update = true;
             existing._lastServerAt = now;
-            existing._active = true;
-            existing.bet365_link = alert.bet365_link || existing.bet365_link;
-            existing.betburger_link = alert.betburger_link || existing.betburger_link;
-            existing.betano_link = alert.betano_link || existing.betano_link;
             existingMap.set(key, existing);
-            if (alert.notify && alert.scores_changed && !isMuted) {
-                showToast(alert);
-                hasNew = true;
-            }
         } else {
             alert._receivedAt = now;
             alert._lastServerAt = now;
-            alert._active = true;
             alert.is_update = false;
             existingMap.set(key, alert);
             if (alert.notify !== false) {
@@ -841,25 +604,21 @@ function triggerAlerts(activeAlerts) {
         }
     });
 
-    // Keep only: still on server active list, OR <20s grace after last active tick
     const updatedHistory = Array.from(existingMap.values()).filter(alert => {
-        const key = alert.match_id || alert.id;
+        const key = alert.match_id || alert.event_id || alert.id;
         if (activeKeys.has(key)) return true;
-        // Resolved: drop after short grace (do not keep 5 min of false "à frente")
         const last = alert._lastServerAt || alert._receivedAt || 0;
-        return (now - last) < RESOLVED_GRACE_MS;
+        return (now - last) < 25000;
     });
 
     updatedHistory.sort((a, b) => (b._receivedAt || 0) - (a._receivedAt || 0));
     alertHistory = updatedHistory;
 
-    if (hasNew && !isMuted) {
+    if (hasNew && !isMuted && audioAlert) {
         try {
             audioAlert.currentTime = 0;
-            audioAlert.play();
-        } catch (e) {
-            console.log('Audio play blocked by browser autoplay policy.');
-        }
+            audioAlert.play().catch(() => {});
+        } catch (e) {}
     }
 
     renderAlerts();
@@ -867,81 +626,74 @@ function triggerAlerts(activeAlerts) {
 }
 
 function renderAlerts() {
+    if (!alertsContainer) return;
+    
     if (alertHistory.length === 0) {
         alertsContainer.innerHTML = `
             <div class="placeholder-state">
                 <div class="placeholder-icon">🛡️</div>
-                <p>Nenhuma divergência detectada.</p>
+                <p>Nenhuma divergência ativa no momento.</p>
             </div>`;
         return;
     }
 
     alertsContainer.innerHTML = alertHistory.map(alert => {
         const priority = alert.priority || 'HIGH';
-        const prioClass = priority === 'GOLDEN' ? 'priority-golden' :
-                         priority === 'CRITICAL' ? 'priority-critical' :
-                         priority === 'HIGH' ? 'priority-high' : 'priority-medium';
+        const prioClass = priority === 'CRITICAL' ? 'priority-critical' : 'priority-high';
 
-        const bet365Url = alert.bet365_link || '#';
-        const betburgerUrl = alert.betburger_link || '#';
-        const matchName = (alert.match_name || alert.name || 'Partida Desconhecida')
-            .replace(/\s+vs\s+/gi, ' x ');
-        // Never invent league — only show if scraped
-        const league = (alert.league || '').trim();
-        const leagueLine = league ? `🏆 ${league}\n` : '';
+        const safeMatchName = escapeHTML((alert.match_name || alert.name || 'Partida Desconhecida').replace(/\s+vs\s+/gi, ' x '));
+        const safeLeague = escapeHTML(alert.league || '');
+        const leagueLine = safeLeague ? `🏆 ${safeLeague}\n` : '';
         const emoji = getSportEmoji(alert.sport);
         const relTime = alert._receivedAt ? getRelativeTime(alert._receivedAt) : (alert.timestamp || '');
         const title = alert.is_update ? '🔄 ATUALIZAÇÃO DA DIVERGÊNCIA' : '🚨 NOVA DIVERGÊNCIA DETECTADA';
-        const b365Now = alert.bet365_score || 'não encontrado';
-        const betanoNow = alert.betano_score || 'não encontrado';
-        const novibetNow = alert.novibet_score || 'não encontrado';
-        const burgerNow = alert.betburger_score || 'não encontrado';
-        const leading = (alert.leading_houses && alert.leading_houses.length)
-            ? alert.leading_houses.join(', ')
-            : '';
+        const delayStr = alert.delay_seconds ? ` [Delay: ${alert.delay_seconds}s]` : '';
+
+        const b365Now = escapeHTML(alert.bet365_score || 'não encontrado');
+        const betanoNow = escapeHTML(alert.betano_score || 'não encontrado');
+        const xbetNow = escapeHTML(alert.xbet_score || 'não encontrado');
+        const novibetNow = escapeHTML(alert.novibet_score || 'não encontrado');
+        const burgerNow = escapeHTML(alert.betburger_score || 'não encontrado');
+        const leading = escapeHTML((alert.leading_houses && alert.leading_houses.length) ? alert.leading_houses.join(', ') : '');
         const leadingLine = leading ? `\n🔺 À frente da casa alvo: ${leading}` : '';
 
-        // Exact format requested by user — real values only
+        const safeB365Url = sanitizeUrl(alert.bet365_link);
+        const safeBetanoUrl = sanitizeUrl(alert.betano_link);
+        const safeXbetUrl = sanitizeUrl(alert.xbet_link || alert.betburger_link);
+        const safeNovibetUrl = sanitizeUrl(alert.novibet_link);
+
         return `
             <div class="alert-item ${prioClass}">
                 <div class="alert-header">
-                    <span>${title}</span>
+                    <span>${title}${delayStr}</span>
                     <span class="alert-timestamp">${relTime}</span>
                 </div>
                 <div class="alert-match-name" style="line-height:1.55; white-space:pre-line; font-size:13px;">
 🎯 ENTRADA PARA BET365
-${leagueLine}${emoji} ${matchName}
+${leagueLine}${emoji} ${safeMatchName}
 
 Bet365 agora: ${b365Now}
 Betano agora: ${betanoNow}
-Novibet agora: ${novibetNow}
-BetBurger agora: ${burgerNow}
-${leadingLine}
+1xBet agora: ${xbetNow}
+${novibetNow !== 'não encontrado' ? `Novibet agora: ${novibetNow}\n` : ''}${burgerNow !== 'não encontrado' && burgerNow !== xbetNow ? `BetBurger agora: ${burgerNow}\n` : ''}${leadingLine}
                 </div>
                 <div class="alert-actions">
-                    ${renderBet365OpenButton(alert)}
-                    ${betburgerUrl !== '#' && betburgerUrl ? `<a href="${betburgerUrl}" target="_blank" class="action-btn betburger-btn" style="margin-left:8px;">BetBurger ↗</a>` : ''}
-                    ${isValidBetanoEventLink(alert.betano_link) ? `<a href="${alert.betano_link}" target="_blank" rel="noopener" class="action-btn" style="background:#ff5000; color:#fff; margin-left:8px;">Betano ↗</a>` : ''}
+                    <button type="button" class="alert-cta-bet365" data-open-match="${safeMatchName}" data-match-id="${escapeHTML(alert.match_id || '')}">⚡ ABRIR BET365</button>
+                    ${safeB365Url !== '#' ? `<a href="${safeB365Url}" target="_blank" rel="noopener" class="action-btn bet365-btn" style="margin-left:8px;">B365 Web ↗</a>` : ''}
+                    ${safeBetanoUrl !== '#' ? `<a href="${safeBetanoUrl}" target="_blank" rel="noopener" class="action-btn" style="background:#ff5000; color:#fff; margin-left:8px;">Betano ↗</a>` : ''}
+                    ${safeXbetUrl !== '#' ? `<a href="${safeXbetUrl}" target="_blank" rel="noopener" class="action-btn betburger-btn" style="margin-left:8px;">1xBet ↗</a>` : ''}
+                    ${safeNovibetUrl !== '#' ? `<a href="${safeNovibetUrl}" target="_blank" rel="noopener" class="action-btn" style="background:#1b4f72; color:#fff; margin-left:8px;">Novibet ↗</a>` : ''}
                 </div>
             </div>`;
     }).join('');
-}
 
-/** True if URL has a real Bet365 event id (EV…), not just #/IP/B92 listing */
-function isValidBet365EventLink(url) {
-    if (!url || typeof url !== 'string') return false;
-    return /EV\d{6,}/i.test(url);
-}
-
-function renderBet365OpenButton(alert) {
-    const name = (alert.match_name || alert.name || '').replace(/'/g, "\\'");
-    const id = (alert.match_id || '').replace(/'/g, "\\'");
-    const url = alert.bet365_link || '';
-    // Always open via API so we click the correct fixture in the Bet365 Chrome
-    return `<button type="button" class="alert-cta-bet365" onclick="openBet365Match('${id}','${name}')" style="cursor:pointer;border:none;">⚡ ABRIR BET365</button>` +
-        (isValidBet365EventLink(url)
-            ? `<button type="button" class="action-btn betburger-btn" onclick="navigator.clipboard.writeText('${url.replace(/'/g, "\\'")}');" style="margin-left:8px;">📋 COPIAR</button>`
-            : `<button type="button" class="action-btn betburger-btn" onclick="navigator.clipboard.writeText('${name}');" style="margin-left:8px;" title="Copia o nome do jogo">📋 NOME</button>`);
+    alertsContainer.querySelectorAll('.alert-cta-bet365').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const mName = e.currentTarget.getAttribute('data-open-match');
+            const mId = e.currentTarget.getAttribute('data-match-id');
+            openBet365Match(mId, mName);
+        });
+    });
 }
 
 async function openBet365Match(matchId, matchName) {
@@ -957,39 +709,18 @@ async function openBet365Match(matchId, matchName) {
             return;
         }
         if (data.status === 'ok') {
-            // Focused in scraper Chrome — brief feedback
-            if (typeof showToast === 'function') {
-                try { showToast({ match_name: matchName, sport: 'tabletennis', priority: 'HIGH', betburger_score: 'Chrome Bet365', bet365_score: 'focado' }); } catch (e) {}
-            }
-            console.log('[Bet365]', data.message || 'Aberto no Chrome do scraper');
+            showToast("Bet365 Aberto", "Janela do Chrome da Bet365 focada na partida.", "info");
             return;
         }
-        // Fallback: open TT listing so user can pick manually
         const listing = data.listing_url || 'https://www.bet365.bet.br/#/IP/B92';
         window.open(listing, '_blank');
-        console.warn('[Bet365] open failed:', data.message);
     } catch (e) {
-        console.error(e);
         window.open('https://www.bet365.bet.br/#/IP/B92', '_blank');
     }
 }
 
-/** Only allow Betano event deep links (…/live/slug/12345/), never hub/sport pages */
-function isValidBetanoEventLink(url) {
-    if (!url || typeof url !== 'string') return false;
-    try {
-        const u = new URL(url, 'https://www.betano.bet.br');
-        if (!/betano\.bet\.br$/i.test(u.hostname.replace(/^www\./, 'www.')) && !/betano\.bet\.br$/i.test(u.hostname)) {
-            // allow www.betano.bet.br
-            if (!u.hostname.includes('betano.bet.br')) return false;
-        }
-        return /\/live\/.+\/\d{5,}\/?$/i.test(u.pathname) || /\/\d{5,}\/?$/i.test(u.pathname);
-    } catch (e) {
-        return false;
-    }
-}
-
 function updateAlertBadge() {
+    if (!alertBadge) return;
     if (alertHistory.length > 0) {
         alertBadge.textContent = alertHistory.length;
         alertBadge.classList.remove('hidden');
@@ -999,40 +730,54 @@ function updateAlertBadge() {
     animateValue(statAlertCount, alertHistory.length);
 }
 
-// Clear alerts
-clearAlertsBtn.addEventListener('click', () => {
-    alertHistory = [];
-    renderAlerts();
-    updateAlertBadge();
-});
+if (clearAlertsBtn) {
+    clearAlertsBtn.addEventListener('click', () => {
+        alertHistory = [];
+        renderAlerts();
+        updateAlertBadge();
+    });
+}
 
 // ════════════════════════════════════════════
-// TOAST NOTIFICATIONS
+// TOAST NOTIFICATIONS (Polymorphic: Text & Alert Object)
 // ════════════════════════════════════════════
-function showToast(alert) {
-    // Limit max toasts
+function showToast(arg1, arg2, arg3) {
+    if (!toastContainer) return;
+
     const currentToasts = toastContainer.querySelectorAll('.toast:not(.toast-out)');
     if (currentToasts.length >= MAX_TOASTS) {
         const oldest = currentToasts[currentToasts.length - 1];
         dismissToast(oldest);
     }
 
-    const emoji = getSportEmoji(alert.sport);
-    const matchName = alert.match_name || alert.name || 'Partida';
-    const priority = alert.priority || 'HIGH';
-
     const toast = document.createElement('div');
     toast.className = 'toast';
-    toast.innerHTML = `
-        <div class="toast-title">⚡ ${priority} — ${alert.sport ? alert.sport.toUpperCase() : 'DIVERGÊNCIA'}</div>
-        <div class="toast-body">${emoji} ${matchName}</div>
-        <div class="toast-sub">BB: ${alert.betburger_score || '-'} vs B365: ${alert.bet365_score || '-'}${alert.freeze_seconds > 0 ? ' · 🧊 ' + alert.freeze_seconds + 's' : ''}</div>
-    `;
+
+    if (typeof arg1 === 'string') {
+        const title = escapeHTML(arg1);
+        const msg = escapeHTML(arg2 || '');
+        toast.innerHTML = `
+            <div class="toast-title">ℹ️ ${title}</div>
+            <div class="toast-body">${msg}</div>
+        `;
+    } else if (typeof arg1 === 'object' && arg1 !== null) {
+        const alert = arg1;
+        const emoji = getSportEmoji(alert.sport);
+        const matchName = escapeHTML(alert.match_name || alert.name || 'Partida');
+        const priority = escapeHTML(alert.priority || 'HIGH');
+        const b365 = escapeHTML(alert.bet365_score || '-');
+        const other = escapeHTML(alert.betano_score || alert.xbet_score || alert.betburger_score || '-');
+
+        toast.innerHTML = `
+            <div class="toast-title">⚡ ${priority} — ${escapeHTML(alert.sport ? alert.sport.toUpperCase() : 'DIVERGÊNCIA')}</div>
+            <div class="toast-body">${emoji} ${matchName}</div>
+            <div class="toast-sub">Ref: ${other} vs B365: ${b365}${alert.delay_seconds ? ' · ⏱️ ' + alert.delay_seconds + 's' : ''}</div>
+        `;
+    }
 
     toast.addEventListener('click', () => dismissToast(toast));
     toastContainer.prepend(toast);
 
-    // Auto-dismiss after duration
     setTimeout(() => dismissToast(toast), TOAST_DURATION);
 }
 
@@ -1043,7 +788,7 @@ function dismissToast(toast) {
 }
 
 // ════════════════════════════════════════════
-// RELATIVE TIME
+// RELATIVE TIME HELPER
 // ════════════════════════════════════════════
 function getRelativeTime(timestamp) {
     const diff = Math.floor((Date.now() - timestamp) / 1000);
@@ -1054,10 +799,9 @@ function getRelativeTime(timestamp) {
     return `há ${Math.floor(diff / 86400)}d`;
 }
 
-// Update relative times every 30 seconds
 setInterval(() => {
     if (alertHistory.length > 0) renderAlerts();
-}, 30000);
+}, 15000);
 
 // ════════════════════════════════════════════
 // PICTURE-IN-PICTURE (FLOAT WINDOW)
@@ -1082,11 +826,9 @@ if (window.electronAPI) {
             if (pipBtn) pipBtn.title = "Modo Compacto / Suspenso";
             if (pipIcon) pipIcon.textContent = "🗖";
         }
-        // Redesenha para ajustar qualquer detalhe específico
         if (alertHistory.length > 0) renderAlerts();
     });
 } else {
-    // Esconde o botão se não estiver rodando no Electron
     const pipBtn = document.getElementById('pip-btn');
     if (pipBtn) pipBtn.style.display = 'none';
 }

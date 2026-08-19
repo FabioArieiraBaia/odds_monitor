@@ -1,12 +1,15 @@
 import asyncio
 import os
+import signal
+import logging
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from typing import List
+from typing import List, Optional
+from pydantic import BaseModel, Field
 
-from pydantic import BaseModel
+logger = logging.getLogger("web.server")
 
 app = FastAPI(title="Odds Divergence Monitor")
 
@@ -20,7 +23,7 @@ USER_MONITORED_LINKS: List[str] = []
 
 
 class LinkRequest(BaseModel):
-    url: str
+    url: str = Field(..., min_length=5, max_length=1000)
 
 
 class RemoveLinkRequest(BaseModel):
@@ -30,24 +33,39 @@ class RemoveLinkRequest(BaseModel):
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
+        self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        self.active_connections.append(websocket)
+        async with self._lock:
+            if websocket not in self.active_connections:
+                self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
+        try:
+            if websocket in self.active_connections:
+                self.active_connections.remove(websocket)
+        except Exception:
+            pass
 
     async def broadcast(self, message: dict):
-        disconnected = []
-        for connection in self.active_connections:
+        if not self.active_connections:
+            return
+
+        async def _safe_send(ws: WebSocket):
             try:
-                await connection.send_json(message)
+                await asyncio.wait_for(ws.send_json(message), timeout=1.5)
+                return None
             except Exception:
-                disconnected.append(connection)
-        for conn in disconnected:
-            self.disconnect(conn)
+                return ws
+
+        # Run concurrent non-blocking sends across all active sockets
+        current_conns = list(self.active_connections)
+        results = await asyncio.gather(*[_safe_send(ws) for ws in current_conns], return_exceptions=True)
+        
+        for res in results:
+            if isinstance(res, WebSocket):
+                self.disconnect(res)
 
 
 manager = ConnectionManager()
@@ -57,19 +75,23 @@ manager = ConnectionManager()
 async def get_dashboard(request: Request):
     return templates.TemplateResponse(request=request, name="dashboard.html", context={})
 
+
 class ConfigRequest(BaseModel):
-    email: str
-    password: str
+    email: str = Field(..., max_length=200)
+    password: str = Field(..., max_length=200)
+
 
 class TelegramConfigRequest(BaseModel):
-    token: str
-    chat_id: str
+    token: str = Field(..., max_length=200)
+    chat_id: str = Field(..., max_length=100)
+
 
 class ScrapersConfigRequest(BaseModel):
     enable_bet365: bool
     enable_betburger: bool
     enable_betano: bool
-    freeze_threshold_seconds: float = 5.0
+    freeze_threshold_seconds: float = Field(default=5.0, ge=1.0, le=60.0)
+
 
 @app.get("/api/config")
 async def get_config():
@@ -85,19 +107,26 @@ async def get_config():
         "freeze_threshold_seconds": settings.FREEZE_THRESHOLD_SECONDS
     }
 
+
+def _sync_set_env_keys(env_path: str, updates: dict):
+    from dotenv import set_key
+    if not os.path.exists(env_path):
+        open(env_path, "a", encoding="utf-8").close()
+    for k, v in updates.items():
+        set_key(env_path, k, str(v))
+
+
 @app.post("/api/config/scrapers")
 async def save_scrapers_config(payload: ScrapersConfigRequest):
-    import os
     try:
-        from dotenv import set_key
         env_path = os.path.join(BASE_DIR, ".env")
-        if not os.path.exists(env_path):
-            open(env_path, "a").close()
-            
-        set_key(env_path, "ENABLE_BET365", str(payload.enable_bet365))
-        set_key(env_path, "ENABLE_BETBURGER", str(payload.enable_betburger))
-        set_key(env_path, "ENABLE_BETANO", str(payload.enable_betano))
-        set_key(env_path, "FREEZE_THRESHOLD_SECONDS", str(payload.freeze_threshold_seconds))
+        updates = {
+            "ENABLE_BET365": payload.enable_bet365,
+            "ENABLE_BETBURGER": payload.enable_betburger,
+            "ENABLE_BETANO": payload.enable_betano,
+            "FREEZE_THRESHOLD_SECONDS": payload.freeze_threshold_seconds,
+        }
+        await asyncio.to_thread(_sync_set_env_keys, env_path, updates)
         
         from config import settings
         settings.ENABLE_BET365 = payload.enable_bet365
@@ -114,58 +143,49 @@ async def save_scrapers_config(payload: ScrapersConfigRequest):
         
         return {"status": "ok"}
     except Exception as e:
+        logger.error(f"Erro ao salvar scrapers config: {e}")
         return {"status": "error", "message": str(e)}
+
 
 @app.post("/api/config")
 async def save_config(payload: ConfigRequest):
-    import os
     try:
-        from dotenv import set_key
         env_path = os.path.join(BASE_DIR, ".env")
-        if not os.path.exists(env_path):
-            open(env_path, "a").close() # Create if not exists
-            
-        set_key(env_path, "BETBURGER_EMAIL", payload.email)
-        
-        # Only overwrite password if a new one was provided (not the placeholder)
+        updates = {"BETBURGER_EMAIL": payload.email}
         if payload.password and payload.password != "********":
-            set_key(env_path, "BETBURGER_PASSWORD", payload.password)
+            updates["BETBURGER_PASSWORD"] = payload.password
+
+        await asyncio.to_thread(_sync_set_env_keys, env_path, updates)
             
-        # Update current runtime settings (though it's best to restart the server)
         from config import settings
         settings.BETBURGER_EMAIL = payload.email
         if payload.password and payload.password != "********":
             settings.BETBURGER_PASSWORD = payload.password
             
         return {"status": "ok"}
-    except ImportError:
-        # If python-dotenv is not installed with cli/set_key support, we do manual replace
-        return {"status": "error", "message": "python-dotenv não suporta escrita. Instale com pip install python-dotenv[cli]"}
     except Exception as e:
+        logger.error(f"Erro ao salvar config: {e}")
         return {"status": "error", "message": str(e)}
+
 
 @app.post("/api/config/telegram")
 async def save_telegram_config(payload: TelegramConfigRequest):
-    import os
     try:
-        from dotenv import set_key
         env_path = os.path.join(BASE_DIR, ".env")
-        if not os.path.exists(env_path):
-            open(env_path, "a").close()
-            
+        updates = {"TELEGRAM_CHAT_ID": payload.chat_id}
         if payload.token and payload.token != "********":
-            set_key(env_path, "TELEGRAM_BOT_TOKEN", payload.token)
-            from config import settings
-            settings.TELEGRAM_BOT_TOKEN = payload.token
-            
-        set_key(env_path, "TELEGRAM_CHAT_ID", payload.chat_id)
+            updates["TELEGRAM_BOT_TOKEN"] = payload.token
+
+        await asyncio.to_thread(_sync_set_env_keys, env_path, updates)
+
         from config import settings
+        if payload.token and payload.token != "********":
+            settings.TELEGRAM_BOT_TOKEN = payload.token
         settings.TELEGRAM_CHAT_ID = payload.chat_id
         
         return {"status": "ok"}
-    except ImportError:
-        return {"status": "error", "message": "python-dotenv não suporta escrita. Instale com pip install python-dotenv[cli]"}
     except Exception as e:
+        logger.error(f"Erro ao salvar telegram config: {e}")
         return {"status": "error", "message": str(e)}
 
 
@@ -178,17 +198,14 @@ class OpenBet365Request(BaseModel):
 async def open_bet365_match(payload: OpenBet365Request):
     """
     Open the correct Bet365 fixture in the scraper Chrome window.
-    Needed because live list often has no EV id for external deep links.
     """
     try:
         from main import bet365_scraper, state_cache
         name = (payload.match_name or "").strip()
-        # Prefer canonical name from cache
         if payload.match_id:
             ev = state_cache.get_event(payload.match_id, "bet365")
             if ev and ev.match_name:
                 name = ev.match_name
-            # If we already have a real EV deep link, return it for external open
             if ev and ev.deep_link and "EV" in ev.deep_link.upper():
                 return {
                     "status": "ok",
@@ -240,67 +257,30 @@ async def remove_monitored_link(payload: RemoveLinkRequest):
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
-        from main import state_cache
-        from datetime import datetime
-        
-        match_ids = state_cache.get_all_active_match_ids()
-        active_matches = []
-        for m_id in match_ids:
-            b365_ev = state_cache.get_event(m_id, "bet365")
-            burger_ev = state_cache.get_event(m_id, "betburger")
-            betano_ev = state_cache.get_event(m_id, "betano")
-            
-            ref_event = b365_ev or burger_ev or betano_ev
-            if not ref_event:
-                continue
-            
-            sources_data = {}
-            if b365_ev:
-                sources_data["bet365"] = {"set_score": b365_ev.set_score, "game_score": b365_ev.game_score, "point_score": b365_ev.point_score}
-            if burger_ev:
-                sources_data["betburger"] = {"set_score": burger_ev.set_score, "game_score": burger_ev.game_score, "point_score": burger_ev.point_score, "surebet_percentage": burger_ev.extra_data.get("surebet_percentage", 0.0)}
-            if betano_ev:
-                sources_data["betano"] = {"set_score": betano_ev.set_score, "game_score": betano_ev.game_score, "point_score": betano_ev.point_score}
-                
-            active_matches.append({
-                "id": m_id,
-                "name": ref_event.match_name,
-                "sport": ref_event.sport,
-                "sources": sources_data,
-                "bet365_link": b365_ev.deep_link if b365_ev else "",
-                "betburger_link": burger_ev.deep_link if burger_ev else "",
-                "betano_link": betano_ev.deep_link if betano_ev else "",
-            })
-            
-        await websocket.send_json({
-            "type": "update",
-            "matches": active_matches,
-            "stats": {
-                "bet365_count": len([m for m in active_matches if "bet365" in m["sources"]]),
-                "betburger_count": len([m for m in active_matches if "betburger" in m["sources"]]),
-                "betano_count": len([m for m in active_matches if "betano" in m["sources"]]),
-                "total_monitored": len(active_matches),
-                "timestamp": datetime.now().strftime("%H:%M:%S"),
-            }
-        })
-    except Exception:
-        pass
+        from main import get_current_ui_snapshot
+        snapshot = get_current_ui_snapshot()
+        if snapshot:
+            await websocket.send_json(snapshot)
+    except Exception as e:
+        logger.debug(f"[WS] Erro ao enviar snapshot inicial: {e}")
 
     try:
         while True:
             # Keep-alive loop
             await websocket.receive_text()
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
         manager.disconnect(websocket)
 
 
 @app.post("/shutdown")
-async def shutdown_endpoint():
-    import os
-    import signal
-    import logging
-    log = logging.getLogger("web.server")
-    log.info("Recebido pedido de encerramento do backend via HTTP API")
+async def shutdown_endpoint(request: Request):
+    client_host = request.client.host if request.client else ""
+    if client_host not in ("127.0.0.1", "localhost", "::1"):
+        return JSONResponse(status_code=403, content={"error": "Acesso não autorizado"})
+
+    logger.info("Recebido pedido de encerramento do backend via HTTP API localhost")
     
     async def self_terminate():
         await asyncio.sleep(0.5)
@@ -308,4 +288,3 @@ async def shutdown_endpoint():
         
     asyncio.create_task(self_terminate())
     return {"status": "shutting_down"}
-

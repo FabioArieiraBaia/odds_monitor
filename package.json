@@ -25,7 +25,6 @@
       "preload.js",
       "package.json",
       "app/**/*",
-      ".env",
       "setup.bat",
       "loading.html",
       "error.html",

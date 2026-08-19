@@ -2,6 +2,9 @@ fastapi
 uvicorn[standard]
 playwright
 playwright-stealth
+undetected-chromedriver
+selenium
+aiohttp
 websockets
 python-dotenv[cli]
 jinja2

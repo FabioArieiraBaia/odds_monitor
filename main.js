@@ -12,8 +12,8 @@ let isQuitting = false;
 let isPiP = false;
 let normalBounds = null;
 
-// Track Chrome debug ports used by our scrapers
-const SCRAPER_DEBUG_PORTS = [9222, 9223];
+// Track Chrome debug ports used by our scrapers (Bet365, BetBurger, Betano, Novibet)
+const SCRAPER_DEBUG_PORTS = [9222, 9223, 9224, 9226];
 
 function createWindow() {
   mainWindow = new BrowserWindow({
