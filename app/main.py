@@ -275,7 +275,7 @@ async def betburger_loop():
     global _last_burger_count
     logger.info("[Loop] BetBurger scraper loop started")
     
-    await asyncio.sleep(6)
+    await asyncio.sleep(4)
     _burger_started = False
     
     while True:
@@ -283,14 +283,14 @@ async def betburger_loop():
             if settings.ENABLE_BETBURGER and settings.BETBURGER_EMAIL:
                 if not _burger_started:
                     logger.info("⏳ Iniciando BetBurger (deferred)...")
-                    await betburger_scraper.start()
+                    await asyncio.wait_for(betburger_scraper.start(), timeout=45)
                     _burger_started = True
-                    logger.info("✅ BetBurger iniciado")
+                    logger.info("✅ BetBurger iniciado com sucesso")
                 
                 events = await betburger_scraper.fetch_live_events()
                 events = [e for e in events if e.sport == "tabletennis"]
+                _last_burger_count = len(events)
                 if events:
-                    _last_burger_count = len(events)
                     current_ids = set()
                     for ev in events:
                         state_cache.update(ev)
@@ -300,6 +300,8 @@ async def betburger_loop():
                 _last_burger_count = 0
         except Exception as e:
             logger.error(f"[Loop] BetBurger scraper loop error: {e}")
+            _burger_started = False
+            await asyncio.sleep(5)
         
         await asyncio.sleep(max(1, settings.POLLING_INTERVAL_SECONDS))
 

@@ -501,12 +501,14 @@ function renderLiveMatches(matches) {
 function renderMatchCardHTML(match) {
     const s = match.sources || {};
     const b365 = s.bet365 || { set_score: '-', game_score: '-', point_score: '-' };
-    const xbet = s['1xbet'] || s.betburger || { set_score: '-', game_score: '-', point_score: '-' };
+    const bb = s.betburger || { set_score: '-', game_score: '-', point_score: '-' };
+    const xbet = s['1xbet'] || { set_score: '-', game_score: '-', point_score: '-' };
     const betano = s.betano || { set_score: '-', game_score: '-', point_score: '-' };
     const novibet = s.novibet || { set_score: '-', game_score: '-', point_score: '-' };
 
     const b365Url = sanitizeUrl(match.bet365_link);
-    const xbetUrl = sanitizeUrl(match.xbet_link || match.betburger_link);
+    const bbUrl = sanitizeUrl(match.betburger_link);
+    const xbetUrl = sanitizeUrl(match.xbet_link);
     const betanoUrl = sanitizeUrl(match.betano_link);
     const novibetUrl = sanitizeUrl(match.novibet_link);
 
@@ -520,7 +522,8 @@ function renderMatchCardHTML(match) {
                 <span class="match-name">${emoji} ${safeName}</span>
                 <div class="match-actions">
                     ${b365Url !== '#' ? `<a href="${b365Url}" target="_blank" rel="noopener" class="action-btn bet365-btn">B365 ↗</a>` : '<span class="action-disabled">B365</span>'}
-                    ${xbetUrl !== '#' ? `<a href="${xbetUrl}" target="_blank" rel="noopener" class="action-btn betburger-btn">1x/BB ↗</a>` : ''}
+                    ${bbUrl !== '#' ? `<a href="${bbUrl}" target="_blank" rel="noopener" class="action-btn" style="background:#00b4d8; color:#fff;">BB ↗</a>` : ''}
+                    ${xbetUrl !== '#' ? `<a href="${xbetUrl}" target="_blank" rel="noopener" class="action-btn betburger-btn">1X ↗</a>` : ''}
                     ${betanoUrl !== '#' ? `<a href="${betanoUrl}" target="_blank" rel="noopener" class="action-btn" style="background:#ff5000; color:#fff;">BET ↗</a>` : ''}
                     ${novibetUrl !== '#' ? `<a href="${novibetUrl}" target="_blank" rel="noopener" class="action-btn" style="background:#1b4f72; color:#fff;">NOVI ↗</a>` : ''}
                 </div>
@@ -534,8 +537,16 @@ function renderMatchCardHTML(match) {
                         <span class="score-label">Game</span> <strong data-score-key="${safeId}_b365_game">${escapeHTML(b365.game_score)}</strong>
                     </div>
                 </div>
+                <div class="source-score" style="border-left: 3px solid #00b4d8;">
+                    <div class="source-name" style="color: #00b4d8; font-weight: bold;">BETBURGER</div>
+                    <div class="score-values">
+                        <span class="score-label">Set</span> <strong data-score-key="${safeId}_bb_set">${escapeHTML(bb.set_score)}</strong>
+                        <span class="score-sep">|</span>
+                        <span class="score-label">Game</span> <strong data-score-key="${safeId}_bb_game">${escapeHTML(bb.game_score)}</strong>
+                    </div>
+                </div>
                 <div class="source-score">
-                    <div class="source-name" style="color: #2980b9; font-weight: bold;">1XBET / BB</div>
+                    <div class="source-name" style="color: #2980b9; font-weight: bold;">1XBET</div>
                     <div class="score-values">
                         <span class="score-label">Set</span> <strong data-score-key="${safeId}_xbet_set">${escapeHTML(xbet.set_score)}</strong>
                         <span class="score-sep">|</span>
