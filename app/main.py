@@ -493,11 +493,43 @@ _broadcast_task = None
 from web.server import app
 
 
+# ── Windows Kernel 1.0ms Timer Resolution ──
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.winmm.timeBeginPeriod(1)
+        logger.info("⚡ Windows kernel timer resolution configured to 1.0ms")
+    except Exception:
+        pass
+
+
+def on_score_changed_reactive(match_id: str, source: str, event, old_ev):
+    """
+    Ultra-low latency reactive callback (< 50µs):
+    Triggers immediate divergence evaluation on the affected match without waiting for the 1s loop.
+    """
+    from web.server import manager
+    alerts = detector.evaluate_match_reactive(match_id)
+    if alerts:
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(manager.broadcast({
+                "type": "alerts",
+                "alerts": alerts
+            }))
+        except RuntimeError:
+            pass
+
+
+# Register reactive callback directly on StateCache ingestion
+state_cache.register_score_listener(on_score_changed_reactive)
+
+
 # ── Lifespan events ──
 @app.on_event("startup")
 async def startup():
     global _b365_task, _onex_task, _bb_task, _betano_task, _novibet_task, _broadcast_task
-    logger.info("🌐 Web server starting...")
+    logger.info("🌐 Web server starting in Reactive Event-Driven mode...")
     _b365_task = asyncio.create_task(bet365_loop())
     _onex_task = asyncio.create_task(onexbet_loop())
     _bb_task = asyncio.create_task(betburger_loop())

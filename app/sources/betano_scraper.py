@@ -160,6 +160,12 @@ class BetanoScraper(BaseSource):
         options.add_argument("--disable-infobars")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--no-sandbox")
+        options.add_argument("--disable-background-timer-throttling")
+        options.add_argument("--disable-renderer-backgrounding")
+        options.add_argument("--disable-backgrounding-occluded-windows")
+        options.add_argument("--disable-ipc-flooding-protection")
+        options.add_argument("--blink-settings=imagesEnabled=false")
+        options.add_argument("--mute-audio")
 
         logger.info("[Betano] Launch via undetected_chromedriver (anti-WAF)...")
         # Flush logs before native UC call (can hard-crash the process)

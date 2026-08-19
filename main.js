@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification } = require('electron');
 const { spawn, exec, execSync } = require('child_process');
 const path = require('path');
 const net = require('net');
@@ -26,6 +26,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      backgroundThrottling: false,
       preload: path.join(__dirname, 'preload.js')
     }
   });
@@ -122,6 +123,29 @@ function createWindow() {
         mainWindow.setSize(1280, 800);
       }
       mainWindow.webContents.send('pip-status', false);
+    }
+  });
+
+  ipcMain.on('trigger-alert-notification', (event, alertData) => {
+    if (mainWindow) {
+      mainWindow.flashFrame(true);
+    }
+    if (Notification && Notification.isSupported() && alertData) {
+      try {
+        const notif = new Notification({
+          title: `⚡ ${alertData.priority || 'DIVERGÊNCIA'} — ${alertData.sport || 'Tênis de Mesa'}`,
+          body: `${alertData.match_name || 'Partida'}\nB365: ${alertData.bet365_score || '-'} vs Ref: ${alertData.betano_score || alertData.xbet_score || '-'}`,
+          silent: true,
+          urgency: 'critical'
+        });
+        notif.on('click', () => {
+          if (mainWindow) {
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        });
+        notif.show();
+      } catch (e) {}
     }
   });
 

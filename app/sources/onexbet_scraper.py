@@ -29,9 +29,17 @@ class OneXBetScraper(BaseSource):
 
     async def start(self):
         if not self._session or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=6, connect=3)
+            timeout = aiohttp.ClientTimeout(total=4, connect=2)
+            connector = aiohttp.TCPConnector(
+                keepalive_timeout=300,
+                ttl_dns_cache=600,
+                limit_per_host=10,
+                enable_cleanup_closed=True,
+                force_close=False
+            )
             self._session = aiohttp.ClientSession(
                 timeout=timeout,
+                connector=connector,
                 headers={
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                     "Accept": "application/json, text/plain, */*",

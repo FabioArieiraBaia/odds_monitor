@@ -93,11 +93,18 @@ class Bet365Scraper(BaseSource):
                 options.add_argument(f"--user-data-dir={user_data_dir}")
                 options.add_argument("--no-first-run")
                 options.add_argument("--no-default-browser-check")
-                options.add_argument("--window-size=1366,3500")
+                options.add_argument("--window-size=1366,1200")
                 options.add_argument("--lang=pt-BR")
                 options.add_argument("--disable-infobars")
                 options.add_argument("--disable-dev-shm-usage")
                 options.add_argument("--no-sandbox")
+                # ── Performance & Anti-Throttling Flags ──
+                options.add_argument("--disable-background-timer-throttling")
+                options.add_argument("--disable-renderer-backgrounding")
+                options.add_argument("--disable-backgrounding-occluded-windows")
+                options.add_argument("--disable-ipc-flooding-protection")
+                options.add_argument("--blink-settings=imagesEnabled=false")
+                options.add_argument("--mute-audio")
                 
                 logger.info("Iniciando Google Chrome real via undetected_chromedriver para o Bet365...")
                 
@@ -140,9 +147,27 @@ class Bet365Scraper(BaseSource):
                     self.page = await self.context.new_page()
                 
                 try:
-                    await self.page.set_viewport_size({"width": 1366, "height": 3500})
+                    await self.page.set_viewport_size({"width": 1366, "height": 1200})
                 except Exception:
                     pass
+
+                # ── CDP Session for Network Filtering & WebSocket Sniffing ──
+                try:
+                    cdp = await self.context.new_cdp_session(self.page)
+                    await cdp.send("Network.enable")
+                    # Block heavy bandwidth video streams, fonts, images and trackers
+                    await cdp.send("Network.setBlockedURLs", {
+                        "urls": [
+                            "*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.svg", "*.ico",
+                            "*.woff", "*.woff2", "*.ttf", "*.eot",
+                            "*.mp4", "*.m3u8", "*.ts", "*.webm", "*.mp3",
+                            "*google-analytics.com*", "*hotjar.com*", "*doubleclick.net*",
+                            "*segment.io*", "*sentry.io*", "*datadoghq.com*"
+                        ]
+                    })
+                    logger.info("⚡ [Bet365 CDP] Bloqueio de mídia/vídeo e aceleração de rede ativados")
+                except Exception as cdp_err:
+                    logger.debug(f"[Bet365 CDP] CDP optimization notice: {cdp_err}")
                 
                 self._is_running = True
                 self._last_reload = datetime.now()

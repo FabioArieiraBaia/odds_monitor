@@ -77,26 +77,62 @@ function getSportEmoji(sport) {
 }
 
 // ════════════════════════════════════════════
-// AUDIO UNLOCK (Bypass Browser Autoplay Policy)
+// WEB AUDIO API SYNTHESIZER (0ms I/O procedural audio)
 // ════════════════════════════════════════════
-function unlockAudio() {
-    if (audioUnlocked || !audioAlert) return;
-    try {
-        audioAlert.volume = 0.01;
-        const playPromise = audioAlert.play();
-        if (playPromise !== undefined) {
-            playPromise.then(() => {
-                audioAlert.pause();
-                audioAlert.currentTime = 0;
-                audioAlert.volume = 1.0;
-                audioUnlocked = true;
-            }).catch(() => {});
-        }
-    } catch (e) {}
+class AlertSynthesizer {
+    constructor() {
+        this.ctx = null;
+        this.isUnlocked = false;
+        this._initOnGesture();
+    }
+
+    _initOnGesture() {
+        const unlock = () => {
+            if (!this.ctx) {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (AudioCtx) this.ctx = new AudioCtx({ latencyHint: 'interactive' });
+            }
+            if (this.ctx && this.ctx.state === 'suspended') {
+                this.ctx.resume();
+            }
+            this.isUnlocked = true;
+            ['click', 'keydown', 'touchstart'].forEach(e => 
+                document.removeEventListener(e, unlock)
+            );
+        };
+        ['click', 'keydown', 'touchstart'].forEach(e => 
+            document.addEventListener(e, unlock, { passive: true })
+        );
+    }
+
+    playAlert(priority = 'HIGH') {
+        if (!this.ctx || this.ctx.state === 'suspended') return;
+        try {
+            const now = this.ctx.currentTime;
+            const gainNode = this.ctx.createGain();
+            gainNode.connect(this.ctx.destination);
+
+            const frequencies = priority === 'CRITICAL' 
+                ? [1760, 2200, 2640] // A6, C#7, E7
+                : [880, 1320];       // A5, E6
+
+            gainNode.gain.setValueAtTime(0.0, now);
+            gainNode.gain.linearRampToValueAtTime(0.35, now + 0.015);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+
+            frequencies.forEach(freq => {
+                const osc = this.ctx.createOscillator();
+                osc.type = priority === 'CRITICAL' ? 'triangle' : 'sine';
+                osc.frequency.setValueAtTime(freq, now);
+                osc.connect(gainNode);
+                osc.start(now);
+                osc.stop(now + 0.26);
+            });
+        } catch (e) {}
+    }
 }
-['click', 'touchstart', 'keydown'].forEach(ev => {
-    document.addEventListener(ev, unlockAudio, { once: true, passive: true });
-});
+
+const alertSynth = new AlertSynthesizer();
 
 // ════════════════════════════════════════════
 // MUTE TOGGLE
@@ -614,11 +650,13 @@ function triggerAlerts(activeAlerts) {
     updatedHistory.sort((a, b) => (b._receivedAt || 0) - (a._receivedAt || 0));
     alertHistory = updatedHistory;
 
-    if (hasNew && !isMuted && audioAlert) {
-        try {
-            audioAlert.currentTime = 0;
-            audioAlert.play().catch(() => {});
-        } catch (e) {}
+    if (hasNew && !isMuted) {
+        const topPrio = activeAlerts.find(a => a.priority === 'CRITICAL') ? 'CRITICAL' : 'HIGH';
+        alertSynth.playAlert(topPrio);
+        
+        if (window.electronAPI && window.electronAPI.sendNativeAlert && activeAlerts.length > 0) {
+            window.electronAPI.sendNativeAlert(activeAlerts[0]);
+        }
     }
 
     renderAlerts();
