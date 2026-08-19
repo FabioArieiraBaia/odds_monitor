@@ -164,6 +164,12 @@ class PointEventTracker:
 
         return False
 
+    @staticmethod
+    def _is_match_finished(state: Tuple[int, int, int, int]) -> bool:
+        """Returns True if match has finished (e.g. 3 sets won in best-of-5)."""
+        set_h, set_a, _, _ = state
+        return max(set_h, set_a) >= 3
+
     # ── Multi-Source Consensus ──
 
     def _determine_consensus(
@@ -315,6 +321,10 @@ class PointEventTracker:
             # Determine Consensus
             consensus_state, confirming_sources = self._determine_consensus(ref_parsed, now)
             if not consensus_state or not confirming_sources:
+                continue
+
+            # Reject finished matches (e.g. 3 sets won in best-of-5)
+            if self._is_match_finished(current_b365_state) or self._is_match_finished(consensus_state):
                 continue
 
             active_event = self._active_events.get(match_id)
