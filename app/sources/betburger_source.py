@@ -187,21 +187,29 @@ class BetBurgerScraper(BaseSource):
                                wait_until="domcontentloaded", timeout=30000)
             await asyncio.sleep(2)
             
-            # Fill login form
-            # BetBurger login form selectors
+            # Dismiss cookie banner if present
+            try:
+                cookie_btn = self.page.locator('button:has-text("Accept All"), button:has-text("Aceitar"), button:has-text("OK")').first
+                if await cookie_btn.is_visible(timeout=2000):
+                    await cookie_btn.click()
+                    await asyncio.sleep(1)
+            except Exception:
+                pass
+
+            # Fill login form with exact BetBurger field IDs
             email_selectors = [
+                '#betburger_user_email',
+                'input[name="betburger_user[email]"]',
                 'input[name="user[email]"]',
                 'input[type="email"]',
                 '#user_email',
-                'input[placeholder*="email" i]',
-                'input[placeholder*="Email" i]',
             ]
             password_selectors = [
+                '#betburger_user_password',
+                'input[name="betburger_user[password]"]',
                 'input[name="user[password]"]',
                 'input[type="password"]',
                 '#user_password',
-                'input[placeholder*="senha" i]',
-                'input[placeholder*="password" i]',
             ]
             
             email_filled = False
@@ -236,11 +244,10 @@ class BetBurgerScraper(BaseSource):
             
             # Click submit
             submit_selectors = [
+                'button:has-text("SIGN IN TO MY ACCOUNT")',
+                'button:has-text("Sign in")',
                 'button[type="submit"]',
                 'input[type="submit"]',
-                'button:has-text("Sign in")',
-                'button:has-text("Entrar")',
-                'button:has-text("Login")',
             ]
             
             for sel in submit_selectors:
