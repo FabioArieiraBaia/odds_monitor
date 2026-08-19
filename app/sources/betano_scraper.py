@@ -1182,6 +1182,71 @@ class BetanoScraper(BaseSource):
             logger.info(f"[Betano] anchors brutos={len(results)} url={d.current_url}")
         return results
 
+    def _extract_optical_fallback(self, raw_items: list) -> List[NormalizedEvent]:
+        """
+        Takes visual screenshots of event elements and decodes scores via OpticalScoreboardReader.
+        Runs when text scraping returns empty or incomplete numbers.
+        """
+        from selenium.webdriver.common.by import By
+        d = self._uc_driver
+        if not d or not self._optical_reader:
+            return []
+
+        optical_events: List[NormalizedEvent] = []
+        try:
+            # Find all score containers on page
+            score_els = d.find_elements(By.CSS_SELECTOR, '[data-qa="score"], .vue-recycle-scroller__item-view, [class*="scoreboard"]')
+            for i, item in enumerate(raw_items[:len(score_els)]):
+                try:
+                    href = item.get("href", "")
+                    lines = item.get("lines", []) or []
+                    if not href:
+                        continue
+
+                    # Take element screenshot PNG
+                    el = score_els[i] if i < len(score_els) else None
+                    if el is None:
+                        continue
+
+                    png_bytes = el.screenshot_as_png
+                    if not png_bytes:
+                        continue
+
+                    img = self._optical_reader.decode_image_bytes(png_bytes)
+                    if img is None or img.size == 0:
+                        continue
+
+                    set_score, game_score, point_score = self._optical_reader.parse_scoreboard_image(img)
+                    if set_score == "0:0" and game_score == "0:0":
+                        continue
+
+                    slug = href.split("?")[0].strip("/").split("/")[-1].replace("-", " ")
+                    match_name, _, _, _ = self._parse_players_and_scores(lines, slug)
+                    deep_link = self._normalize_deep_link(href)
+                    if not deep_link:
+                        continue
+
+                    m_id = self._extract_event_id_from_url(deep_link) or f"opt_{i}_{int(time.time())}"
+
+                    optical_events.append(NormalizedEvent(
+                        match_id=m_id,
+                        match_name=match_name,
+                        sport="tabletennis",
+                        source="betano",
+                        set_score=set_score,
+                        game_score=game_score,
+                        point_score=point_score,
+                        deep_link=deep_link,
+                        timestamp=datetime.now(),
+                        extra_data={"extraction_mode": "optical_cv"}
+                    ))
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.debug(f"[Betano] Optical fallback capture error: {e}")
+
+        return optical_events
+
     def _normalize_deep_link(self, href: str) -> str:
         """
         Build a valid Betano EVENT deep link.
@@ -1467,9 +1532,15 @@ class BetanoScraper(BaseSource):
                 logger.info(f"[Betano] Sample TT: {sample}")
             elif raw_data:
                 logger.warning(
-                    "[Betano] Links no live mas 0 TT após filtro TABL/heurística — "
-                    "confira se o chip Tênis de Mesa está selecionado na janela Chrome"
+                    "[Betano] Links no live mas 0 TT após filtro — executando fallback óptico com IA de Visão..."
                 )
+                try:
+                    optical_events = await asyncio.to_thread(self._extract_optical_fallback, raw_data)
+                    if optical_events:
+                        events.extend(optical_events)
+                        logger.info(f"⚡ [Betano Optical OCR] {len(optical_events)} placares recuperados por Visão Computacional!")
+                except Exception as opt_err:
+                    logger.debug(f"[Betano] Optical fallback error: {opt_err}")
 
         except Exception as e:
             self._consecutive_errors += 1
