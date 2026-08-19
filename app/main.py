@@ -450,13 +450,11 @@ async def broadcast_loop():
                             if leading else ""
                         )
                         msg_scores = [
-                            f"Bet365 agora: {alert.get('bet365_score', 'não encontrado')}",
-                            f"Betano agora: {alert.get('betano_score', 'não encontrado')}",
-                            f"1xBet agora: {alert.get('xbet_score', 'não encontrado')}",
+                            f"🎯 <b>Bet365 (Alvo)</b>: {alert.get('bet365_score', 'não encontrado')}",
+                            f"🍔 <b>BetBurger</b>: {alert.get('betburger_score', 'não encontrado')}",
+                            f"⚡ <b>1xBet</b>: {alert.get('xbet_score', 'não encontrado')}",
+                            f"🟠 <b>Betano</b>: {alert.get('betano_score', 'não encontrado')}",
                         ]
-                        bb_score = alert.get('betburger_score')
-                        if bb_score and bb_score != "não encontrado" and bb_score != alert.get('xbet_score'):
-                            msg_scores.append(f"BetBurger agora: {bb_score}")
 
                         msg = (
                             f"{title}\n"

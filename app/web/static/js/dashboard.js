@@ -710,10 +710,11 @@ function renderAlerts() {
 🎯 ENTRADA PARA BET365
 ${leagueLine}${emoji} ${safeMatchName}
 
-Bet365 agora: ${b365Now}
-Betano agora: ${betanoNow}
+Bet365 agora (Alvo): ${b365Now}
+BetBurger agora: ${burgerNow}
 1xBet agora: ${xbetNow}
-${novibetNow !== 'não encontrado' ? `Novibet agora: ${novibetNow}\n` : ''}${burgerNow !== 'não encontrado' && burgerNow !== xbetNow ? `BetBurger agora: ${burgerNow}\n` : ''}${leadingLine}
+Betano agora: ${betanoNow}
+${novibetNow !== 'não encontrado' ? `Novibet agora: ${novibetNow}\n` : ''}${leadingLine}
                 </div>
                 <div class="alert-actions">
                     <button type="button" class="alert-cta-bet365" data-open-match="${safeMatchName}" data-match-id="${escapeHTML(alert.match_id || '')}">⚡ ABRIR BET365</button>

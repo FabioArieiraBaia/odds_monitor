@@ -180,29 +180,13 @@ class PointEventTracker:
                 state_counts[st] = []
             state_counts[st].append(src)
 
-        # 1. Majority agreement (>= 2 independent sources)
+        # 1. Strict Dual Validation: Requires >= 2 independent reference sources agreeing (e.g. BetBurger + 1xBet / Betano)
         for st, srcs in state_counts.items():
             if len(srcs) >= 2:
                 return st, srcs
 
-        # 2. Resilient Fallback: if only 1 reference source is online, accept with high confidence
-        if len(ref_states) == 1:
-            st, srcs = next(iter(state_counts.items()))
-            return st, srcs
-
-        # 3. Discrepancy between single sources: select furthest valid progression
-        best_state = None
-        best_progress = -1
-        best_sources = []
-
-        for st, srcs in state_counts.items():
-            prog = self._state_progress(st)
-            if prog > best_progress:
-                best_progress = prog
-                best_state = st
-                best_sources = srcs
-
-        return best_state, best_sources
+        # No single-source alerts allowed — requires strict double validation
+        return None, []
 
     # ── Confidence Scoring (0-100) ──
 
