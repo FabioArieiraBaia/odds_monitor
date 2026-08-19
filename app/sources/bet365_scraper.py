@@ -58,7 +58,9 @@ class Bet365Scraper(BaseSource):
         self._last_reload = datetime.now()
         self._launch_lock = asyncio.Lock()
         self._consecutive_errors = 0
-        self._max_errors_before_restart = 5
+        self._max_errors_before_restart = 50
+        self._uc_driver = None
+        self._profile_suffix = f"bet365_uc_{int(time.time())}"
 
     def get_name(self) -> str:
         return "bet365"
@@ -67,44 +69,65 @@ class Bet365Scraper(BaseSource):
         await self._launch_browser()
 
     async def _launch_browser(self):
-        """Launch a stealth Chromium browser instance using CDP to bypass anti-bot."""
+        """Launch Chrome via undetected_chromedriver and connect Playwright CDP to bypass anti-bot."""
         async with self._launch_lock:
             if self._is_running:
                 return
             try:
-                # Local Chrome/Edge CDP setup
-                possible_paths = [
-                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-                    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-                ]
-                chrome_path = next((p for p in possible_paths if os.path.exists(p)), None)
-                if not chrome_path:
-                    raise FileNotFoundError("Google Chrome or Microsoft Edge not found")
+                import undetected_chromedriver as uc
+                
+                # Best-effort taskkill stale chromedrivers
+                try:
+                    subprocess.run(
+                        ["taskkill", "/IM", "chromedriver.exe", "/F"],
+                        capture_output=True, timeout=5
+                    )
+                except Exception:
+                    pass
+                
+                local_app_data = os.environ.get('LOCALAPPDATA', '.')
+                user_data_dir = os.path.join(local_app_data, "OddsDivergenceMonitor", f"chrome_data_bet365_{self._profile_suffix}")
+                os.makedirs(user_data_dir, exist_ok=True)
+                
+                options = uc.ChromeOptions()
+                options.add_argument(f"--user-data-dir={user_data_dir}")
+                options.add_argument("--no-first-run")
+                options.add_argument("--no-default-browser-check")
+                options.add_argument("--window-size=1366,3500")
+                options.add_argument("--lang=pt-BR")
+                options.add_argument("--disable-infobars")
+                options.add_argument("--disable-dev-shm-usage")
+                options.add_argument("--no-sandbox")
+                
+                logger.info("Iniciando Google Chrome real via undetected_chromedriver para o Bet365...")
+                
+                # Auto-detect major Chrome version or fallback to 151
+                chrome_major = 151
+                try:
+                    import subprocess
+                    out = subprocess.check_output(r'powershell -Command "(Get-Item \'C:\Program Files\Google\Chrome\Application\chrome.exe\').VersionInfo.Major"', shell=True, text=True).strip()
+                    if out.isdigit():
+                        chrome_major = int(out)
+                except Exception:
+                    pass
+
+                self._uc_driver = uc.Chrome(options=options, headless=False, use_subprocess=True, version_main=chrome_major)
+                await asyncio.sleep(2)
+                
+                try:
+                    self._uc_driver.get("about:blank")
+                except Exception:
+                    pass
                     
-                local_app_data = os.environ.get('LOCALAPPDATA')
-                if local_app_data:
-                    user_data_dir = os.path.join(local_app_data, "OddsDivergenceMonitor", "chrome_data")
-                else:
-                    user_data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "chrome_data")
-                port = 9222
+                dbg = (self._uc_driver.capabilities.get("goog:chromeOptions") or {}).get("debuggerAddress")
+                logger.info(f"[Bet365] UC debuggerAddress={dbg}")
                 
-                logger.info("Iniciando Google Chrome real via subprocess para o Bet365...")
-                self.chrome_process = subprocess.Popen([
-                    chrome_path,
-                    f"--remote-debugging-port={port}",
-                    f"--user-data-dir={user_data_dir}",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                ])
-                
-                # Aguarda o Chrome iniciar
-                await asyncio.sleep(4)
+                if not dbg:
+                    raise RuntimeError("Failed to retrieve debuggerAddress from undetected_chromedriver")
                 
                 self._pw = await async_playwright().start()
-                logger.info(f"Conectando o Playwright ao Chrome na porta {port}...")
-                self.browser = await self._pw.chromium.connect_over_cdp(f"http://localhost:{port}", timeout=60000)
+                logger.info(f"Conectando o Playwright ao Chrome via CDP em {dbg}...")
+                self.browser = await self._pw.chromium.connect_over_cdp(f"http://{dbg}", timeout=60000)
                 
                 if self.browser.contexts:
                     self.context = self.browser.contexts[0]
@@ -116,17 +139,22 @@ class Bet365Scraper(BaseSource):
                 else:
                     self.page = await self.context.new_page()
                 
+                try:
+                    await self.page.set_viewport_size({"width": 1366, "height": 3500})
+                except Exception:
+                    pass
+                
                 self._is_running = True
                 self._last_reload = datetime.now()
                 self._consecutive_errors = 0
-                logger.info("Bet365 browser launched successfully via CDP")
+                logger.info("Bet365 browser launched successfully via UC + Playwright CDP")
             except Exception as e:
                 logger.error(f"Failed to launch Bet365 browser: {e}")
                 await self._cleanup()
                 raise
 
     async def _cleanup(self):
-        """Gracefully close all browser resources and kill Chrome process tree."""
+        """Gracefully close all browser resources and clean up Chrome sessions."""
         self._is_running = False
         logger.info("[Bet365] Shutting down browser...")
         
@@ -146,37 +174,27 @@ class Bet365Scraper(BaseSource):
         
         # Stop Playwright
         try:
-            if hasattr(self, '_pw'):
+            if hasattr(self, '_pw') and self._pw:
                 await self._pw.stop()
         except Exception as e:
             logger.debug(f"[Bet365] Error stopping playwright: {e}")
+        self._pw = None
         
-        # Kill Chrome process tree (Windows: taskkill /T kills all children)
-        if self.chrome_process:
-            pid = self.chrome_process.pid
+        # Close undetected driver
+        if self._uc_driver is not None:
             try:
-                logger.info(f"[Bet365] Killing Chrome (PID {pid}) and its tree...")
-                subprocess.run(
-                    ["taskkill", "/PID", str(pid), "/T", "/F"],
-                    capture_output=True, timeout=5
-                )
+                await asyncio.to_thread(self._uc_driver.quit)
             except Exception as e:
-                logger.debug(f"[Bet365] taskkill failed: {e} — trying terminate()")
-                try:
-                    self.chrome_process.terminate()
-                    self.chrome_process.wait(timeout=3)
-                except Exception:
-                    try:
-                        self.chrome_process.kill()
-                    except Exception:
-                        pass
-            self.chrome_process = None
+                logger.debug(f"[Bet365] Error quitting UC driver: {e}")
+            self._uc_driver = None
+            
+        self._profile_suffix = f"bet365_uc_{int(time.time())}"
         
-        # Kill any Chrome listening on port 9222 (safety net)
+        # Best-effort taskkill stale chromedrivers
         try:
             subprocess.run(
-                'for /f "tokens=5" %a in (\'netstat -ano ^| findstr :9222\') do taskkill /PID %a /T /F',
-                shell=True, capture_output=True, timeout=3
+                ["taskkill", "/IM", "chromedriver.exe", "/F"],
+                capture_output=True, timeout=5
             )
         except Exception:
             pass
@@ -187,9 +205,14 @@ class Bet365Scraper(BaseSource):
         await self._cleanup()
 
     async def _navigate_to_sport(self, sport_code: str):
-        """Navigate to a specific sport's in-play page and wait for it to load."""
+        """Navigate to a specific sport's in-play page if not already there."""
         url = f"{BET365_BASE}/#/IP/{sport_code}"
         try:
+            current_url = self.page.url if self.page else ""
+            if sport_code in current_url or current_url.endswith(sport_code):
+                # Already on target in-play sport page — preserve WebSocket live stream!
+                return
+
             logger.info(f"Navegando para {url} via page.goto...")
             await self.page.goto(url, wait_until="commit", timeout=60000)
             
@@ -243,9 +266,32 @@ class Bet365Scraper(BaseSource):
                 logger.info(f"Page loaded, but container checks timed out. Proceeding with fallback sleep...")
                 await asyncio.sleep(1)
                 
+            # Dismiss cookie consent/modals on Bet365
+            await self._dismiss_cookie_banners()
+                
         except Exception as e:
             logger.warning(f"Navigation to {sport_code} failed: {e}")
             raise
+
+    async def _dismiss_cookie_banners(self):
+        """Click common BR cookie/age consent buttons if present on Bet365."""
+        if not self.page:
+            return
+        try:
+            await self.page.evaluate("""() => {
+                const buttons = Array.from(document.querySelectorAll('button, a, div, span'));
+                for (const b of buttons) {
+                    const t = (b.innerText || '').trim();
+                    if (t === 'Aceitar' || t === 'ACEITAR' || t === 'Permitir Todos' || t === 'Concordar' || t === 'OK' || t === 'Entendi' || t === 'Permitir todos') {
+                        try {
+                            b.click();
+                        } catch(e) {}
+                    }
+                }
+            }""")
+            await asyncio.sleep(0.8)
+        except Exception:
+            pass
 
     def _normalize_name(self, name: str) -> str:
         """Normalize match name for consistent matching between sources."""
@@ -402,50 +448,75 @@ class Bet365Scraper(BaseSource):
                             }
                             
                             // ── Extract event link / event ID ──
-                            // Strategy: look for direct anchor with EV# href inside this fixture only.
-                            // Do NOT use closest() beyond the fixture boundary as it may pick up
-                            // a parent league/market container shared by multiple fixtures.
+                            // Live list often has NO EV in DOM — deep link may stay empty (open via click API).
                             let eventId = null;
                             let href = null;
                             
-                            const linkEl = fixture.querySelector('a[href*="EV"]');
+                            const linkEl = fixture.querySelector('a[href*="EV"], a[href*="#/IP/"]');
                             if (linkEl) href = linkEl.getAttribute('href');
                             
-                            // Check data attributes ONLY on the fixture element itself
-                            const dataAttrs = ['data-fixtureid', 'data-eventid', 'data-id', 'data-ev'];
+                            const dataAttrs = ['data-fixtureid', 'data-eventid', 'data-id', 'data-ev', 'data-fi'];
                             for (const attr of dataAttrs) {
                                 const val = fixture.getAttribute(attr);
-                                if (val) {
-                                    eventId = val;
-                                    break;
-                                }
+                                if (val) { eventId = val; break; }
                             }
-                            
-                            // If not found on fixture itself, check direct children only
-                            // (NOT arbitrary ancestors which could be a league/market wrapper)
                             if (!eventId) {
                                 for (const child of fixture.children) {
                                     for (const attr of dataAttrs) {
                                         const val = child.getAttribute(attr);
-                                        if (val) {
-                                            eventId = val;
-                                            break;
-                                        }
+                                        if (val) { eventId = val; break; }
                                     }
                                     if (eventId) break;
                                 }
                             }
-                            
-                            // Last fallback: check onclick/data-nav on clickable child elements
                             if (!eventId && !href) {
                                 const clickable = fixture.querySelector('[onclick*="EV"], [data-nav*="EV"]');
                                 if (clickable) {
                                     const onclickStr = clickable.getAttribute('onclick') || 
                                                       clickable.getAttribute('data-nav') || '';
-                                    const evMatch = onclickStr.match(/EV(\d+[A-Z0-9]*)/);
+                                    const evMatch = onclickStr.match(/EV\d+[A-Z0-9]*/i);
                                     if (evMatch) eventId = evMatch[0];
                                 }
                             }
+                            // Sniff fixture HTML for EV… pattern (sometimes embedded in handlers)
+                            if (!eventId) {
+                                const htmlBit = fixture.outerHTML || '';
+                                const m = htmlBit.match(/EV\d{8,}[A-Z0-9]*/i);
+                                if (m) eventId = m[0];
+                            }
+                            
+                            // ── Extract league / tournament name ──
+                            let league = '';
+                            try {
+                                const isGarbageLeague = (t) => {
+                                    if (!t || t.length < 4) return true;
+                                    const low = t.toLowerCase().replace(/\s+/g, '');
+                                    // Bet365 UI chrome often concatenates: PrincipalPartidaGame or duplicates
+                                    if (/principal|partida/i.test(low)) return true;
+                                    if (/^(game|set|pts|live|aovivo|principal|partida)+$/i.test(low)) return true;
+                                    return false;
+                                };
+                                let el = fixture;
+                                for (let i = 0; i < 10 && el; i++) {
+                                    el = el.parentElement;
+                                    if (!el) break;
+                                    const hdr = el.querySelector('.ovm-ClassificationHeader, [class*="ClassificationHeader"]');
+                                    if (hdr) {
+                                        const t = hdr.textContent.trim().replace(/\s+/g, ' ');
+                                        if (!isGarbageLeague(t)) { league = t; break; }
+                                    }
+                                }
+                                if (!league) {
+                                    let prev = fixture.previousElementSibling;
+                                    while (prev) {
+                                        if (prev.classList && (prev.classList.contains('ovm-ClassificationHeader') || (prev.className && String(prev.className).includes('ClassificationHeader')))) {
+                                            const t = prev.textContent.trim().replace(/\s+/g, ' ');
+                                            if (!isGarbageLeague(t)) { league = t; break; }
+                                        }
+                                        prev = prev.previousElementSibling;
+                                    }
+                                }
+                            } catch(e) {}
                             
                             results.push({
                                 name: matchName,
@@ -454,6 +525,7 @@ class Bet365Scraper(BaseSource):
                                 flat: flatScores,
                                 eventId: eventId,
                                 href: href,
+                                league: league,
                             });
                         } catch (e) {
                             // Skip this fixture on error
@@ -502,6 +574,7 @@ class Bet365Scraper(BaseSource):
                         point_score=point_score,
                         timestamp=now,
                         deep_link=deep_link,
+                        extra_data={"league": item.get('league', '')},
                     ))
                 except Exception as e:
                     logger.debug(f"Error parsing fixture: {e}")
@@ -752,28 +825,148 @@ class Bet365Scraper(BaseSource):
         except Exception:
             return False
 
+    def _normalize_ev_id(self, raw: str) -> str:
+        """Normalize to EVxxxxxxxxxxxxC# form when possible."""
+        if not raw:
+            return ""
+        s = str(raw).strip()
+        m = re.search(r"(EV\d+[A-Z0-9]*)", s, re.I)
+        if m:
+            ev = m.group(1).upper()
+        else:
+            digits = re.sub(r"\D", "", s)
+            if len(digits) < 8:
+                return ""
+            ev = f"EV{digits}"
+        if not re.search(r"C\d+$", ev, re.I):
+            ev = f"{ev}C1"
+        return ev
+
     def _build_deep_link(self, event_id: Optional[str], href: Optional[str], sport: str) -> str:
-        """Build a deep link URL for the specific Bet365 event."""
-        # If we have a direct href, use it
+        """
+        Build a deep link ONLY when we have a real event id (EV…).
+        Never return the generic sport list (#/IP/B92) as if it were the match —
+        that was opening the wrong page for users.
+        Correct in-play form: https://www.bet365.bet.br/#/IP/EV…C1
+        """
+        # 1) EV inside href
         if href:
-            if href.startswith('http'):
-                return href
-            return f"{BET365_BASE}/{href.lstrip('/')}"
-        
-        # If we have an event ID, construct the deep link
+            ev = self._normalize_ev_id(href)
+            if ev:
+                return f"{BET365_BASE}/#/IP/{ev}"
+            h = href.strip()
+            if h.startswith("http") and re.search(r"EV\d+", h, re.I):
+                return h
+            if h.startswith("#/") and re.search(r"EV\d+", h, re.I):
+                # Ensure /IP/ for live
+                if "/IP/" not in h.upper():
+                    ev2 = self._normalize_ev_id(h)
+                    if ev2:
+                        return f"{BET365_BASE}/#/IP/{ev2}"
+                return f"{BET365_BASE}/{h.lstrip('/')}" if h.startswith("#") else f"{BET365_BASE}/#{h}"
+
+        # 2) Explicit event id
         if event_id:
-            # Clean the event ID
-            ev = event_id.strip()
-            if not ev.startswith('EV'):
-                ev = f"EV{ev}"
-            # Add sport class suffix if not present
-            if not re.search(r'C\d+$', ev):
-                ev += "C1"
-            return f"{BET365_BASE}/#/{ev}"
-        
-        # Fallback to sport listing page
-        sport_code = SPORT_CODES.get(sport, "B13")
-        return f"{BET365_BASE}/#/{sport_code}"
+            ev = self._normalize_ev_id(event_id)
+            if ev:
+                return f"{BET365_BASE}/#/IP/{ev}"
+
+        # 3) No reliable event id — empty (frontend will open via scraper click API)
+        return ""
+
+    def sport_listing_url(self, sport: str = "tabletennis") -> str:
+        """Public listing page (not a match deep link)."""
+        code = SPORT_CODES.get(sport, "B92")
+        return f"{BET365_BASE}/#/IP/{code}"
+
+    async def open_match_by_name(self, match_name: str) -> dict:
+        """
+        Focus the Bet365 Chrome window and click the fixture matching match_name.
+        Used when DOM has no EV id (list-only live view).
+        """
+        if not self.page or not self._is_running:
+            return {"ok": False, "error": "Bet365 scraper offline"}
+
+        name = (match_name or "").strip()
+        if not name:
+            return {"ok": False, "error": "Nome vazio"}
+
+        # Tokens from "A vs B" / "A x B"
+        cleaned = re.sub(r"\s+v(?:s)?\.?\s+|\s+x\s+", " ", name, flags=re.I)
+        tokens = [t.lower() for t in re.split(r"\s+", cleaned) if len(t) >= 3]
+        if not tokens:
+            tokens = [t.lower() for t in name.split() if len(t) >= 2]
+
+        try:
+            # Ensure we are on table tennis live list
+            sport_code = "B92"
+            if "B92" not in (self.page.url or ""):
+                await self._navigate_to_sport(sport_code)
+                await asyncio.sleep(2)
+
+            fixtures = self.page.locator(".ovm-Fixture")
+            n = await fixtures.count()
+            best_i = -1
+            best_score = 0
+            for i in range(n):
+                try:
+                    text = (await fixtures.nth(i).inner_text(timeout=1000) or "").lower()
+                    score = sum(1 for t in tokens if t in text)
+                    if score > best_score:
+                        best_score = score
+                        best_i = i
+                except Exception:
+                    continue
+
+            if best_i < 0 or best_score < max(1, min(2, len(tokens) // 2)):
+                # Fallback: open listing only
+                listing = self.sport_listing_url("tabletennis")
+                await self.page.goto(listing, wait_until="commit", timeout=30000)
+                self._bring_chrome_to_front()
+                return {
+                    "ok": False,
+                    "error": f"Partida não encontrada na lista Bet365 (tokens={tokens})",
+                    "listing_url": listing,
+                }
+
+            await fixtures.nth(best_i).click(timeout=3000)
+            await asyncio.sleep(0.8)
+            self._bring_chrome_to_front()
+            logger.info(f"[Bet365] Abriu fixture '{name}' (score={best_score}, idx={best_i})")
+            return {
+                "ok": True,
+                "matched_tokens": best_score,
+                "url": self.page.url,
+                "message": "Jogo focado no Chrome da Bet365",
+            }
+        except Exception as e:
+            logger.error(f"[Bet365] open_match_by_name error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def _bring_chrome_to_front(self):
+        """Best-effort focus of the Bet365 Chrome window (Windows)."""
+        try:
+            pid = getattr(self.chrome_process, "pid", None)
+            if not pid:
+                return
+            # PowerShell: restore + foreground by process id
+            subprocess.Popen(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    f"$p=Get-Process -Id {pid} -ErrorAction SilentlyContinue; "
+                    f"if($p){{ Add-Type -Name W -Namespace N -MemberDefinition "
+                    f"'[DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h);"
+                    f"[DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h,int n);'; "
+                    f"$h=$p.MainWindowHandle; if($h -ne [IntPtr]::Zero){{ [N.W]::ShowWindow($h,9); [N.W]::SetForegroundWindow($h) }} }}",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+
     async def force_hard_reload(self):
         """Forces an immediate hard reload of the SPA to verify frozen scores."""
         now = datetime.now()
@@ -804,9 +997,9 @@ class Bet365Scraper(BaseSource):
             await self._launch_browser()
             
         now = datetime.now()
-        # Fallback: Force a hard reload every 5 minutes just to clear memory/state
-        if (now - self._last_reload).total_seconds() > 300:
-            logger.info("[Bet365] Performing scheduled 5-minute fallback reload...")
+        # Fallback: Force a hard reload every 90 seconds to prevent WebSocket connection freeze / DOM throttling
+        if (now - self._last_reload).total_seconds() > 90:
+            logger.info("[Bet365] Performing scheduled 90-second anti-freeze reload...")
             asyncio.create_task(self.force_hard_reload())
         
         all_events = []

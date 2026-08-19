@@ -31,10 +31,13 @@ function createWindow() {
   });
 
   const userDataPath = app.getPath('userData');
-  const setupMarker = path.join(userDataPath, '.setup_done_v6');
+  const setupMarker = path.join(userDataPath, '.setup_done_v7');
+  const userVenvPython = path.join(userDataPath, 'venv', 'Scripts', 'python.exe');
 
-  // Verifica se o setup ja foi feito
-  if (!fs.existsSync(setupMarker)) {
+  // Verifica se o setup ja foi feito e se o python do venv existe
+  const isSetupDone = fs.existsSync(setupMarker) && fs.existsSync(userVenvPython);
+
+  if (!isSetupDone) {
     // Carrega a tela de loading local
     mainWindow.loadFile(path.join(__dirname, 'loading.html'));
     

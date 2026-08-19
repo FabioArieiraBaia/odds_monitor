@@ -16,7 +16,11 @@ from core.normalizer import NormalizedEvent
 logger = logging.getLogger(__name__)
 
 BETBURGER_BASE = "https://www.betburger.com"
-BETBURGER_LIVE_URL = f"{BETBURGER_BASE}/arbs/live"
+# Events live = full live scoreboard (base for divergence). Arbs = surebets only.
+BETBURGER_EVENTS_LIVE_URL = f"{BETBURGER_BASE}/events/live#sportIds=13"
+BETBURGER_ARBS_LIVE_URL = f"{BETBURGER_BASE}/arbs/live"
+BETBURGER_LIVE_URL = BETBURGER_EVENTS_LIVE_URL  # primary
+
 
 
 class BetBurgerScraper(BaseSource):
@@ -83,7 +87,7 @@ class BetBurgerScraper(BaseSource):
                 
                 self._pw = await async_playwright().start()
                 logger.info(f"Conectando o Playwright ao Chrome (BetBurger) na porta {port}...")
-                self.browser = await self._pw.chromium.connect_over_cdp(f"http://localhost:{port}", timeout=60000)
+                self.browser = await self._pw.chromium.connect_over_cdp(f"http://127.0.0.1:{port}", timeout=60000)
                 
                 if self.browser.contexts:
                     self.context = self.browser.contexts[0]
@@ -265,130 +269,155 @@ class BetBurgerScraper(BaseSource):
             logger.error(f"BetBurger login error: {e}")
             return False
 
+    def _flip_player(self, player: str) -> str:
+        """'Last, First' → 'First Last' (BetBurger style → Bet365 style)."""
+        p = (player or "").strip()
+        if "," in p:
+            last, first = p.split(",", 1)
+            return f"{first.strip()} {last.strip()}".strip()
+        return p
+
+    def _canonical_match_name(self, raw: str) -> str:
+        """
+        Normalize BetBurger names to 'Player A vs Player B'.
+        Examples:
+          'Andrle, Tomas - Steffan, Jan' → 'Tomas Andrle vs Jan Steffan'
+          'A vs B' stays as is
+        """
+        name = (raw or "").strip()
+        # Strip trailing score noise if still present
+        name = re.sub(r"\d+:\d+.*$", "", name).strip()
+        name = re.sub(r"\s*[·•].*$", "", name).strip()
+        if " - " in name:
+            left, right = name.split(" - ", 1)
+        elif re.search(r"\s+vs\.?\s+", name, re.I):
+            parts = re.split(r"\s+vs\.?\s+", name, maxsplit=1, flags=re.I)
+            left, right = parts[0], parts[1] if len(parts) > 1 else ""
+        elif re.search(r"\s+x\s+", name, re.I):
+            parts = re.split(r"\s+x\s+", name, maxsplit=1, flags=re.I)
+            left, right = parts[0], parts[1] if len(parts) > 1 else ""
+        else:
+            return name
+        return f"{self._flip_player(left)} vs {self._flip_player(right)}".strip()
+
     def _normalize_name(self, name: str) -> str:
         """Normalize match name for consistent matching between sources."""
-        cleaned = name.lower().strip()
-        cleaned = re.sub(r'\s+v(?:s)?\.?\s+', ' vs ', cleaned)
-        cleaned = re.sub(r'\s+x\s+', ' vs ', cleaned)
-        cleaned = re.sub(r'\s*[-/]\s*', ' ', cleaned)
-        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-        cleaned = re.sub(r'\(.*?\)', '', cleaned).strip()
+        cleaned = self._canonical_match_name(name).lower().strip()
+        cleaned = re.sub(r"\s+v(?:s)?\.?\s+", " vs ", cleaned)
+        cleaned = re.sub(r"\s+x\s+", " vs ", cleaned)
+        cleaned = re.sub(r"\s*[-/]\s*", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        cleaned = re.sub(r"\(.*?\)", "", cleaned).strip()
         return cleaned
 
+    def _normalize_sport(self, sport_raw: str) -> str:
+        """Map BetBurger sport labels to internal keys."""
+        s = (sport_raw or "").lower().strip()
+        s = re.sub(r"\s+", " ", s)
+        if not s:
+            return "unknown"
+        # Table tennis BEFORE plain tennis (avoid 'table tennis' → tennis)
+        if "table tennis" in s or "tênis de mesa" in s or "tenis de mesa" in s or "ping pong" in s or s in ("tt", "🏓"):
+            return "tabletennis"
+        if s in ("tennis", "tênis", "tenis") or (s.endswith("tennis") and "table" not in s and "e-tennis" not in s):
+            if "e-tennis" in s or "e tennis" in s:
+                return "tennis"
+            return "tennis"
+        if "basket" in s or "basquete" in s:
+            return "basketball"
+        if "volley" in s or "vôlei" in s or "volei" in s:
+            return "volleyball"
+        if "soccer" in s or "football" in s or "futebol" in s:
+            return "soccer"
+        if "baseball" in s:
+            return "baseball"
+        if "hockey" in s:
+            return "icehockey"
+        if "badminton" in s:
+            return "badminton"
+        if "handball" in s:
+            return "handball"
+        compact = s.replace(" ", "")
+        if compact == "tabletennis":
+            return "tabletennis"
+        return compact or "unknown"
+
     def _detect_sport(self, text: str) -> str:
-        """Detect sport type from text/icons on the page."""
-        text_lower = text.lower()
-        sport_map = {
-            "tennis": ["tennis", "tênis", "🎾"],
-            "basketball": ["basketball", "basquete", "🏀", "nba", "euroleague"],
-            "tabletennis": ["table tennis", "tênis de mesa", "ping pong", "🏓"],
-            "volleyball": ["volleyball", "voleibol", "vôlei", "🏐"],
-            "badminton": ["badminton", "🏸"],
-            "icehockey": ["ice hockey", "hockey", "hóquei", "🏒", "nhl"],
-            "soccer": ["soccer", "football", "futebol", "⚽"],
-            "handball": ["handball", "handebol"],
-            "baseball": ["baseball", "beisebol"],
-            "esports": ["esports", "e-sports", "cs2", "dota", "league of legends"],
-            "cricket": ["cricket", "críquete"],
-            "futsal": ["futsal"],
-        }
-        for sport, keywords in sport_map.items():
-            for kw in keywords:
-                if kw in text_lower:
-                    return sport
-        return "unknown"
+        """Detect sport type from free text."""
+        return self._normalize_sport(text)
+
+    def _parse_name_and_scores(self, name_cell: str, sport: str) -> tuple:
+        """
+        Parse BetBurger name cell like:
+          'Andrle, Tomas - Steffan, Jan1:2 (5:11, 11:7, 7:11, 0:2) · 4 set'
+        → (match_name, set_score, game_score, point_score)
+        """
+        cell = (name_cell or "").strip()
+        scores = re.findall(r"\d+:\d+", cell)
+        # Match name = text before first score
+        match_raw = re.split(r"\d+:\d+", cell, maxsplit=1)[0].strip()
+        match_name = self._canonical_match_name(match_raw)
+        set_score, game_score, point_score = self._parse_scores(scores, sport)
+        return match_name, set_score, game_score, point_score
 
     async def _extract_surebets(self) -> List[NormalizedEvent]:
         """
-        Extract live surebet data from BetBurger's page.
-        BetBurger shows a table of surebets with bookmaker comparisons.
+        Extract live events from BetBurger Events Live table (primary base).
+        Columns: Sport | Region | League | Date | Name+Score | Bookmakers
         """
-        events = []
+        events: List[NormalizedEvent] = []
         now = datetime.now()
-        
+
         try:
-            # Dump the current HTML to see what the scraper is looking at
             try:
                 html_content = await self.page.content()
                 with open("debug_betburger.html", "w", encoding="utf-8") as f:
                     f.write(html_content)
                 logger.info("Dumped BetBurger HTML to debug_betburger.html")
             except Exception as e:
-                logger.error(f"Error dumping BetBurger HTML: {e}")
-                
-            # First check if the page is returning raw JSON (e.g. from /api/live)
-            is_json = await self.page.evaluate("""
-                () => {
-                    try {
-                        const text = document.body.innerText || document.documentElement.innerText;
-                        if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
-                            JSON.parse(text.trim());
-                            return true;
-                        }
-                    } catch (e) {}
-                    return false;
+                logger.debug(f"Error dumping BetBurger HTML: {e}")
+
+            raw_data = await self.page.evaluate("""() => {
+                // Auto-close obtrusive login/register popups
+                const closeBtn = document.querySelector('button.close.closeBtn, .closeBtn');
+                if (closeBtn && closeBtn.offsetParent !== null) {
+                    closeBtn.click();
                 }
-            """)
-            
-            if is_json:
-                logger.info("BetBurger API JSON detectado!")
-                json_data = await self.page.evaluate("() => JSON.parse(document.body.innerText || document.documentElement.innerText)")
-                
-                import json
-                with open("debug_betburger.json", "w", encoding="utf-8") as f:
-                    json.dump(json_data, f, indent=2, ensure_ascii=False)
-                
-                # Basic JSON extraction (assuming it's a list of matches or surebets)
-                # Since we don't know the exact structure, we'll try to find common fields
-                events_list = json_data if isinstance(json_data, list) else json_data.get('surebets', json_data.get('events', []))
-                
-                for item in events_list:
-                    try:
-                        # Attempt to extract fields from JSON
-                        match_name = item.get('event_name') or item.get('match') or item.get('name') or "Unknown Match"
-                        sport = item.get('sport_name') or item.get('sport') or "unknown"
-                        sport_norm = self._normalize_sport(sport)
-                        
-                        score = item.get('score', '0:0')
-                        set_score, game_score, point_score = self._parse_scores([score], sport_norm)
-                        
-                        events.append(NormalizedEvent(
-                            event_id=str(item.get('id', '')),
-                            match_name=match_name,
-                            sport=sport_norm,
-                            home_team=match_name.split(' - ')[0] if ' - ' in match_name else match_name,
-                            away_team=match_name.split(' - ')[1] if ' - ' in match_name else "",
-                            set_score=set_score,
-                            game_score=game_score,
-                            point_score=point_score,
-                            source=self.get_name(),
-                            updated_at=now,
-                            deep_link=f"{BETBURGER_BASE}/surebets/live",
-                            extra_data={
-                                "surebet_percentage": float(item.get('percent_text', '0').replace('%', '')),
-                                "is_fresh": is_fresh,
-                                "bet365_arrow": bet365_arrow,
-                                "target_arrow": target_arrow,
-                                **item
-                            }
-                        ))
-                    except Exception as e:
-                        logger.debug(f"Error parsing JSON item: {e}")
-                
-            # --- STRUCTURED DOM EXTRACTOR ---
-            raw_data = await self.page.evaluate("""
-                () => {
-                    const results = [];
+                const cookieBtn = document.querySelector('.cky-btn-close');
+                if (cookieBtn && cookieBtn.offsetParent !== null) {
+                    cookieBtn.click();
+                }
+
+                const results = [];
+                const eventRows = document.querySelectorAll('tr.events-table-row');
+                for (const row of eventRows) {
+                    try {
+                        const tds = Array.from(row.querySelectorAll('td'));
+                        if (tds.length < 5) continue;
+                        const sportText = (tds[0].innerText || '').trim();
+                        const region = (tds[1].innerText || '').trim();
+                        const league = (tds[2].innerText || '').trim();
+                        const dateText = (tds[3].innerText || '').trim();
+                        const nameCell = (tds[4].innerText || '').trim();
+                        if (!nameCell || nameCell.length < 5) continue;
+                        results.push({
+                            source: 'events_table',
+                            sport: sportText,
+                            region: region,
+                            league: league,
+                            date: dateText,
+                            name_cell: nameCell,
+                            raw_text: (row.innerText || '').trim()
+                        });
+                    } catch (e) {}
+                }
+
+                if (results.length === 0) {
                     const rows = document.querySelectorAll('.surebet, .arb, [class*="arb-item"]');
-                    
                     for (const row of rows) {
                         try {
                             const sportEl = row.querySelector('.sport-name');
                             const sport = sportEl ? sportEl.textContent.trim() : '';
-                            
-                            const percentEl = row.querySelector('.percent');
-                            const percentText = percentEl ? percentEl.textContent.trim() : '';
-                            
                             let match_name = '';
                             let href = '';
                             const eventLink = row.querySelector('.event-name .name a, .event-name a');
@@ -399,244 +428,121 @@ class BetBurgerScraper(BaseSource):
                                 const nameEl = row.querySelector('.event-name .name');
                                 if (nameEl) match_name = nameEl.textContent.trim();
                             }
-                            
                             const bets = [];
-                            const betWrappers = row.querySelectorAll('.bet-wrapper');
-                            let bet365_arrow = 'none';
-                            let target_arrow = 'none';
-                            
-                            for (const bet of betWrappers) {
+                            for (const bet of row.querySelectorAll('.bet-wrapper')) {
                                 const bookieEl = bet.querySelector('.bookmaker-name');
                                 const scoreEl = bet.querySelector('.bookmaker-name .current-score, .current-score');
                                 let bookmaker = '';
                                 if (bookieEl) {
                                     const linkSpan = bookieEl.querySelector('.link-span, span');
-                                    if (linkSpan) {
-                                        bookmaker = linkSpan.textContent.trim();
-                                    } else {
-                                        const clone = bookieEl.cloneNode(true);
-                                        const scoreChild = clone.querySelector('.current-score');
-                                        if (scoreChild) scoreChild.remove();
-                                        bookmaker = clone.textContent.trim();
-                                    }
+                                    bookmaker = linkSpan ? linkSpan.textContent.trim() : bookieEl.textContent.trim();
                                 }
-                                
-                                // Look for arrows indicating odd movement
-                                let arrow = 'none';
-                                const icons = bet.querySelectorAll('i[class*="icon-arrow"], i[class*="arrow"], span[class*="arrow"]');
-                                for (const icon of icons) {
-                                    const classes = icon.className.toLowerCase();
-                                    if (classes.includes('green') || classes.includes('up') || classes.includes('success')) arrow = 'green';
-                                    else if (classes.includes('red') || classes.includes('down') || classes.includes('danger')) arrow = 'red';
-                                    else if (classes.includes('grey') || classes.includes('gray')) arrow = 'grey';
-                                }
-                                
-                                if (bookmaker.toLowerCase().includes('bet365') || bookmaker.toLowerCase().includes('1xbet')) {
-                                    if (arrow !== 'none') bet365_arrow = arrow;
-                                } else {
-                                    if (arrow !== 'none') target_arrow = arrow;
-                                }
-
-                                 const betLinkEl = bet.querySelector('a') || (bet.tagName === 'A' ? bet : null);
-                                 const betHref = betLinkEl ? betLinkEl.getAttribute('href') || '' : '';
-
-                                 bets.push({
-                                     bookmaker: bookmaker,
-                                     score: scoreEl ? scoreEl.textContent.trim() : '',
-                                     arrow: arrow,
-                                     href: betHref
-                                 });
+                                const betLinkEl = bet.querySelector('a');
+                                bets.push({
+                                    bookmaker: bookmaker,
+                                    score: scoreEl ? scoreEl.textContent.trim() : '',
+                                    href: betLinkEl ? (betLinkEl.getAttribute('href') || '') : ''
+                                });
                             }
-                            
-                            // Check if it's a fresh arb (green border)
-                            let is_fresh = false;
-                            try {
-                                const borderCol = window.getComputedStyle(row).borderColor || '';
-                                if (borderCol.includes('128, 0') || borderCol.includes('green') || row.className.includes('fresh') || row.className.includes('new')) {
-                                    is_fresh = true;
-                                }
-                            } catch(e) {}
-                            
-                            if (bets.length > 0) {
+                            if (match_name) {
                                 results.push({
+                                    source: 'surebet',
                                     sport: sport,
                                     match_name: match_name,
-                                    percent_text: percentText,
+                                    name_cell: match_name,
+                                    league: '',
                                     bets: bets,
                                     href: href,
-                                    is_fresh: is_fresh,
-                                    bet365_arrow: bet365_arrow,
-                                    target_arrow: target_arrow,
-                                    raw_text: row.textContent || row.innerText || ''
+                                    raw_text: (row.innerText || '').trim()
                                 });
                             }
                         } catch (e) {}
                     }
-                    
-                    // Fallback to Events Live page table if no surebet rows were found
-                    if (results.length === 0) {
-                        const eventRows = document.querySelectorAll('tr.events-table-row');
-                        for (const row of eventRows) {
-                            try {
-                                const tds = row.querySelectorAll('td');
-                                if (tds.length === 0) continue;
-                                
-                                const rowText = row.textContent || row.innerText || '';
-                                const sportText = tds[0].textContent.trim();
-                                
-                                let match_name = '';
-                                let raw_match_cell = '';
-                                
-                                for (const td of tds) {
-                                    const text = td.textContent.trim();
-                                    // Find the TD that contains the teams (has " - " and is long enough to not be just a date)
-                                    if (text.includes(' - ') && !match_name && text.length > 10 && !/^\d{2}\.\d{2}\.\d{4}/.test(text)) {
-                                        raw_match_cell = text;
-                                        // Clean scores from match name (e.g., "Player A - Player B 1:1 (1:2...)")
-                                        match_name = text.replace(/\s+\d+:\d+.*/, '').trim();
-                                    }
-                                }
-                                
-                                if (match_name) {
-                                    // Find scores from the raw cell text
-                                    const scores = raw_match_cell.match(/\d+:\d+/g) || [];
-                                    
-                                    results.push({
-                                        sport: sportText,
-                                        match_name: match_name,
-                                        percent_text: '0%',
-                                        bets: [],
-                                        href: '',
-                                        scores: scores,
-                                        raw_text: rowText
-                                    });
-                                }
-                            } catch (e) {}
-                        }
-                    }
-                    
-                    return results;
                 }
-            """)
-            
-            import re
-            
-            logger.info(f"raw_data has {len(raw_data)} items")
-            
-            for item in raw_data:
+                return results;
+            }""")
+
+            logger.info(f"[BetBurger] raw rows={len(raw_data or [])} url={self.page.url}")
+
+            sport_counts: Dict[str, int] = {}
+            for item in raw_data or []:
                 try:
-                    # 1. Sport
-                    sport_raw = item.get('sport', '')
-                    sport = sport_raw.lower().replace(" ", "")
-                    
-                    # 2. Match Name
-                    match_name = item.get('match_name', '').strip()
-                    if not match_name:
+                    sport = self._normalize_sport(item.get("sport", "") or item.get("raw_text", ""))
+                    sport_counts[sport] = sport_counts.get(sport, 0) + 1
+
+                    league = (item.get("league") or "").strip()
+                    name_cell = item.get("name_cell") or item.get("match_name") or ""
+                    if not name_cell:
                         continue
-                    
-                    scores_found = item.get('scores')
-                    if scores_found is not None:
-                        # Fallback event parser route
-                        sport = self._detect_sport(item.get('raw_text', ''))
-                        if sport == "unknown":
-                            sport = self._detect_sport(match_name)
-                        if sport == "unknown":
-                            sport = "tennis"
-                            
-                        set_score, game_score, point_score = self._parse_scores(scores_found, sport)
-                        surebet_perc = 0.0
-                        bets = []
+
+                    if item.get("source") == "events_table" or item.get("name_cell"):
+                        match_name, set_score, game_score, point_score = self._parse_name_and_scores(
+                            name_cell, sport
+                        )
                     else:
-                        # Original surebet parser route
-                        # 3. Surebet Percentage
-                        percent_text = item.get('percent_text', '')
-                        surebet_perc = 0.0
-                        perc_match = re.search(r'(\d+(?:\.\d+)?)%', percent_text)
-                        if perc_match:
-                            surebet_perc = float(perc_match.group(1))
-                        
-                        # 4. Extract scores of each bookmaker
-                        bets = item.get('bets', [])
-                        non_b365_scores = []
-                        b365_scores = []
-                        
+                        match_name = self._canonical_match_name(name_cell)
+                        bets = item.get("bets") or []
+                        scores_pool = []
                         for b in bets:
-                            bookie = b.get('bookmaker', '').lower()
-                            score_str = b.get('score', '')
-                            if not score_str:
-                                continue
-                            if '365' in bookie:
-                                b365_scores.append(score_str)
-                            else:
-                                non_b365_scores.append(score_str)
-                                
-                        # Select the reference score
-                        selected_score_str = None
-                        scores_to_evaluate = non_b365_scores if non_b365_scores else b365_scores
-                        
-                        if scores_to_evaluate:
-                            best_score_str = scores_to_evaluate[0]
-                            max_val = -1
-                            for s_str in scores_to_evaluate:
-                                scores_found_in_bet = re.findall(r'\d+:\d+', s_str)
-                                temp_sets, temp_games, _ = self._parse_scores(scores_found_in_bet, sport)
-                                s_h, s_a = self._parse_score_pair(temp_sets)
-                                g_h, g_a = self._parse_score_pair(temp_games)
-                                val = (s_h + s_a) * 10 + (g_h + g_a)
-                                if val > max_val:
-                                    max_val = val
-                                    best_score_str = s_str
-                            selected_score_str = best_score_str
-                        else:
-                            selected_score_str = "0:0"
-                            
-                        # Extract the selected scores
-                        scores_found_in_bet = re.findall(r'\d+:\d+', selected_score_str)
-                        set_score, game_score, point_score = self._parse_scores(scores_found_in_bet, sport)
-                    
+                            sc = b.get("score") or ""
+                            scores_pool.extend(re.findall(r"\d+:\d+", sc))
+                        if not scores_pool:
+                            scores_pool = re.findall(r"\d+:\d+", item.get("raw_text", ""))
+                        set_score, game_score, point_score = self._parse_scores(scores_pool, sport)
+
+                    if not match_name or len(match_name) < 5:
+                        continue
+
                     match_id = self._normalize_name(match_name)
-                    href = item.get('href', '')
-                    deep_link = f"https://www.betburger.com{href}" if href else BETBURGER_LIVE_URL
-                    
-                    # Extract Bet365 direct redirect link if present in bets
+                    href = item.get("href") or ""
+                    if href.startswith("/"):
+                        deep_link = f"https://www.betburger.com{href}"
+                    elif href:
+                        deep_link = href
+                    else:
+                        deep_link = BETBURGER_EVENTS_LIVE_URL
+
                     bet365_link = ""
-                    for b in bets:
-                        b_bookie = b.get('bookmaker', '').lower()
-                        b_href = b.get('href', '')
-                        if '365' in b_bookie and b_href:
-                            if b_href.startswith('/'):
-                                bet365_link = f"https://www.betburger.com{b_href}"
-                            else:
-                                bet365_link = b_href
+                    for b in item.get("bets") or []:
+                        if "365" in (b.get("bookmaker") or "").lower() and b.get("href"):
+                            h = b["href"]
+                            bet365_link = h if h.startswith("http") else f"https://www.betburger.com{h}"
                             break
 
-                    events.append(NormalizedEvent(
-                        match_id=match_id,
-                        match_name=match_name,
-                        sport=sport,
-                        source=self.get_name(),
-                        set_score=set_score,
-                        game_score=game_score,
-                        point_score=point_score,
-                        timestamp=now,
-                        deep_link=deep_link,
-                        extra_data={
-                            "surebet_percentage": float(item.get('percent_text', '0').replace('%', '')),
-                            "is_fresh": item.get('is_fresh', False),
-                            "bet365_arrow": item.get('bet365_arrow', 'none'),
-                            "target_arrow": item.get('target_arrow', 'none'),
-                            "raw_text": item.get('raw_text', ''),
-                            "bet365_link": bet365_link,
-                            "bets": bets
-                        }
-                    ))
+                    events.append(
+                        NormalizedEvent(
+                            match_id=match_id,
+                            match_name=match_name,
+                            sport=sport,
+                            source=self.get_name(),
+                            set_score=set_score,
+                            game_score=game_score,
+                            point_score=point_score,
+                            timestamp=now,
+                            deep_link=deep_link,
+                            extra_data={
+                                "league": league,
+                                "region": item.get("region", ""),
+                                "bet365_link": bet365_link,
+                                "raw_text": item.get("raw_text", ""),
+                                "source_path": item.get("source", ""),
+                            },
+                        )
+                    )
                 except Exception as e:
-                    logger.error(f"Error parsing BetBurger structured item: {e} | Item: {item}")
+                    logger.error(f"Error parsing BetBurger item: {e} | Item: {item}")
+
+            logger.info(f"[BetBurger] sport breakdown: {sport_counts}")
+            if events:
+                sample = ", ".join(
+                    f"{e.match_name} [{e.sport} {e.set_score}/{e.game_score}]" for e in events[:4]
+                )
+                logger.info(f"[BetBurger] sample: {sample}")
             return events
-        
+
         except Exception as e:
-            logger.error(f"Error extracting BetBurger surebets: {e}")
-        
+            logger.error(f"Error extracting BetBurger events: {e}")
+
         return events
 
     def _parse_score_pair(self, score: str) -> tuple:
@@ -738,8 +644,7 @@ class BetBurgerScraper(BaseSource):
 
     async def fetch_live_events(self) -> List[NormalizedEvent]:
         """
-        Main entry: fetch all live events from BetBurger.
-        Launches browser if needed, logs in, navigates to live surebets, extracts data.
+        Main entry: fetch live events from BetBurger Events Live (score base).
         """
         if not self._is_running or not self.page:
             if self._is_running and not self.page:
@@ -747,67 +652,77 @@ class BetBurgerScraper(BaseSource):
                 await self._recreate_page()
             else:
                 await self._launch_browser()
-        
+
         try:
-            current_url = self.page.url
-            
-            # Se o usuario estiver na tela de login, esperamos ele logar
+            current_url = self.page.url or ""
+
             if "users/sign_in" in current_url or "login" in current_url:
-                logger.info("Esperando você fazer o login manual no BetBurger...")
+                logger.info("Esperando login manual no BetBurger...")
                 await asyncio.sleep(5)
                 return []
-            
-            # Automatic login if credentials exist
+
             if not self._is_logged_in and self.email and self.password:
                 await self._login()
-            
-            # Se nao esta na pagina de eventos, navega para ela
+
+            # Always prefer Events Live (full scoreboard), not Arbs
             if "events/live" not in current_url:
-                logger.info("Navegando para aba de Eventos do BetBurger...")
+                logger.info(f"Navegando para Events Live: {BETBURGER_EVENTS_LIVE_URL}")
                 try:
-                    await self.page.goto(BETBURGER_LIVE_URL, wait_until="domcontentloaded", timeout=30000)
+                    await self.page.goto(
+                        BETBURGER_EVENTS_LIVE_URL, wait_until="domcontentloaded", timeout=30000
+                    )
                     await asyncio.sleep(4)
                 except Exception as e:
-                    logger.warning(f"Error navigating to BetBurger live URL: {e}. Retrying after recreating page...")
+                    logger.warning(f"Goto events/live failed: {e}. Recreating page...")
                     await self._recreate_page()
-                    await self.page.goto(BETBURGER_LIVE_URL, wait_until="domcontentloaded", timeout=30000)
+                    await self.page.goto(
+                        BETBURGER_EVENTS_LIVE_URL, wait_until="domcontentloaded", timeout=30000
+                    )
                     await asyncio.sleep(4)
             else:
-                # Reload para pegar dados frescos
+                # Soft refresh: re-goto is more reliable than reload on SPA
                 try:
-                    logger.info("Recarregando página do BetBurger...")
-                    await self.page.reload(wait_until="domcontentloaded", timeout=30000)
+                    await self.page.goto(
+                        BETBURGER_EVENTS_LIVE_URL, wait_until="domcontentloaded", timeout=30000
+                    )
                     await asyncio.sleep(3)
                 except Exception as e:
-                    logger.warning(f"Error reloading BetBurger page: {e}. Falling back to goto...")
-                    await asyncio.sleep(2)
+                    logger.warning(f"Refresh events/live failed: {e}")
                     try:
-                        if "detached" in str(e).lower() or "closed" in str(e).lower() or "abort" in str(e).lower():
-                            await self._recreate_page()
-                        await self.page.goto(BETBURGER_LIVE_URL, wait_until="domcontentloaded", timeout=30000)
-                        await asyncio.sleep(3)
-                    except Exception as goto_err:
-                        logger.error(f"Fallback goto failed: {goto_err}. Recreating page completely...")
                         await self._recreate_page()
-                        await self.page.goto(BETBURGER_LIVE_URL, wait_until="domcontentloaded", timeout=30000)
+                        await self.page.goto(
+                            BETBURGER_EVENTS_LIVE_URL, wait_until="domcontentloaded", timeout=30000
+                        )
                         await asyncio.sleep(4)
-            
+                    except Exception as e2:
+                        logger.error(f"BetBurger recovery failed: {e2}")
+                        return []
+
+            # Wait for table rows
+            try:
+                await self.page.wait_for_selector("tr.events-table-row", timeout=8000)
+            except Exception:
+                logger.warning("[BetBurger] Nenhuma tr.events-table-row ainda (login/filtro?)")
+
             events = await self._extract_surebets()
-            logger.info(f"[BetBurger] {len(events)} events extracted")
+            tt = [e for e in events if e.sport == "tabletennis"]
+            logger.info(
+                f"[BetBurger] extracted={len(events)} tabletennis={len(tt)} url={self.page.url}"
+            )
             self._consecutive_errors = 0
             return events
-            
+
         except Exception as e:
             self._consecutive_errors += 1
             logger.error(f"Error fetching BetBurger events: {e}")
-            
+
             if self._consecutive_errors >= self._max_errors_before_restart:
                 logger.warning("Too many BetBurger errors, restarting browser...")
                 await self._cleanup()
                 await asyncio.sleep(5)
                 try:
                     await self._launch_browser()
-                except:
+                except Exception:
                     pass
-            
+
             return []

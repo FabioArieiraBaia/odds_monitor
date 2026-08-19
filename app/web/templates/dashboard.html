@@ -59,13 +59,13 @@
                 </div>
                 <div class="stat-card-glow"></div>
             </div>
-            <div class="stat-card stat-xbet">
-                <div class="stat-card-icon" style="color:#27ae60;">1X</div>
+            <div class="stat-card stat-betano">
+                <div class="stat-card-icon" style="color:#ff5000; font-weight:800;">BET</div>
                 <div class="stat-card-body">
-                    <div class="stat-card-value" id="stat-xbet">—</div>
-                    <div class="stat-card-label">Eventos 1xBet</div>
+                    <div class="stat-card-value" id="stat-betano">—</div>
+                    <div class="stat-card-label">Eventos Betano</div>
                 </div>
-                <div class="stat-card-glow" style="background: radial-gradient(circle at top right, rgba(39, 174, 96, 0.4), transparent 70%);"></div>
+                <div class="stat-card-glow" style="background: radial-gradient(circle at top right, rgba(255, 80, 0, 0.4), transparent 70%);"></div>
             </div>
             <div class="stat-card stat-paired">
                 <div class="stat-card-icon">⇄</div>
@@ -131,6 +131,58 @@
             </div>
         </section>
 
+        <!-- ── Settings Panel (Telegram) ── -->
+        <section class="settings-panel glass-card">
+            <div class="settings-header" id="toggle-telegram-panel">
+                <h2>📢 Configurações (Telegram)</h2>
+                <button class="collapse-btn" id="collapse-telegram-btn" title="Expandir/Recolher">
+                    <span id="collapse-telegram-icon">▾</span>
+                </button>
+            </div>
+            <div id="telegram-panel-body" class="collapsible-body collapsed">
+                <p class="helper-text">Insira o Token do Bot e o Chat ID para receber notificações de divergências no Telegram.</p>
+                <div class="link-input-area config-input-area">
+                    <input type="text" id="tg-token" placeholder="Token do Bot Telegram" autocomplete="off">
+                    <input type="text" id="tg-chat-id" placeholder="Chat ID Telegram" autocomplete="off">
+                    <button id="save-telegram-btn">Salvar Telegram</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Settings Panel (Fontes de Dados / Scrapers) ── -->
+        <section class="settings-panel glass-card">
+            <div class="settings-header" id="toggle-scrapers-panel">
+                <h2>⚡ Fontes de Dados (Scrapers Ativos)</h2>
+                <button class="collapse-btn" id="collapse-scrapers-btn" title="Expandir/Recolher">
+                    <span id="collapse-scrapers-icon">▾</span>
+                </button>
+            </div>
+            <div id="scrapers-panel-body" class="collapsible-body">
+                <p class="helper-text">Ative ou desative cada fonte de dados em tempo real para focar apenas nas casas desejadas.</p>
+                <div style="display: flex; gap: 20px; align-items: center; margin-top: 10px; flex-wrap: wrap;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #fff; font-weight: 600;">
+                        <input type="checkbox" id="toggle-bet365" checked style="width: 18px; height: 18px; accent-color: #27ae60;">
+                        🟢 Bet365
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #fff; font-weight: 600;">
+                        <input type="checkbox" id="toggle-betburger" checked style="width: 18px; height: 18px; accent-color: #2980b9;">
+                        🔵 BetBurger
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #fff; font-weight: 600;">
+                        <input type="checkbox" id="toggle-betano" checked style="width: 18px; height: 18px; accent-color: #ff5000;">
+                        🟠 Betano
+                    </label>
+                    <button id="save-scrapers-btn" style="padding: 6px 14px; background: #27ae60; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">Salvar Fontes</button>
+                </div>
+                <div style="display: flex; gap: 20px; align-items: center; margin-top: 14px; flex-wrap: wrap; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px;">
+                    <label style="display: flex; align-items: center; gap: 8px; color: #fff; font-weight: 600;">
+                        ⏱️ Atraso Mínimo para Alerta (segundos):
+                        <input type="number" id="freeze-threshold-input" value="5" min="1" max="60" style="width: 70px; padding: 4px 8px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #fff; font-weight: 700; text-align: center;">
+                    </label>
+                </div>
+            </div>
+        </section>
+
         <!-- ── Filter Toolbar ── -->
         <div class="filter-toolbar">
             <div class="filter-group">
@@ -187,6 +239,6 @@
     <!-- Audio Element for sound alerts -->
     <audio id="alert-sound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav" preload="auto"></audio>
 
-    <script src="/static/js/dashboard.js?v=3"></script>
+    <script src="/static/js/dashboard.js?v=10"></script>
 </body>
 </html>
