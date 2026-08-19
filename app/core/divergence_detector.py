@@ -187,12 +187,12 @@ class PointEventTracker:
                 state_counts[st] = []
             state_counts[st].append(src)
 
-        # 1. Strict Dual Validation: Requires >= 2 independent reference sources agreeing (e.g. BetBurger + 1xBet / Betano)
+        # 1. Strict Dual Validation: Requires >= 2 independent reference sources agreeing AND BetBurger must be in consensus
         for st, srcs in state_counts.items():
-            if len(srcs) >= 2:
+            if len(srcs) >= 2 and "betburger" in srcs:
                 return st, srcs
 
-        # No single-source alerts allowed — requires strict double validation
+        # No alerts allowed without BetBurger as base reference + second independent source
         return None, []
 
     # ── Confidence Scoring (0-100) ──
@@ -326,6 +326,15 @@ class PointEventTracker:
 
             # Reject finished matches (e.g. 3 sets won in best-of-5)
             if self._is_match_finished(current_b365_state) or self._is_match_finished(consensus_state):
+                continue
+
+            c_sh, c_sa, c_gh, c_ga = consensus_state
+            b_sh, b_sa, b_gh, b_ga = current_b365_state
+            c_sets = c_sh + c_sa
+            b_sets = b_sh + b_sa
+
+            # Reject set break intervals (new set at 0:0 while players are resting/switching sides)
+            if c_sets > b_sets and (c_gh + c_ga) == 0:
                 continue
 
             active_event = self._active_events.get(match_id)
