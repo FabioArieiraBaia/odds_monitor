@@ -81,8 +81,8 @@ class PointEventTracker:
         self,
         state_cache: StateCache,
         min_delay_seconds: float = 5.0,
-        sync_window_seconds: float = 4.0,
-        min_confidence_score: float = 70.0,
+        sync_window_seconds: float = 20.0,
+        min_confidence_score: float = 65.0,
         max_valid_delay_seconds: float = 45.0,
     ):
         self.state_cache = state_cache
@@ -209,11 +209,11 @@ class PointEventTracker:
         # Base: confirming sources count
         num_confirming = len(event.confirming_sources)
         if num_confirming >= 3:
-            score += 50.0
-        elif num_confirming == 2:
-            score += 40.0
+            score += 55.0
+        elif num_confirming >= 2:
+            score += 45.0
         elif num_confirming == 1:
-            score += 30.0
+            score += 25.0
 
         # Feed freshness / health of confirming sources
         fresh_sources = 0
@@ -531,8 +531,8 @@ class DivergenceDetector:
         self.tracker = PointEventTracker(
             state_cache=state_cache,
             min_delay_seconds=self.freeze_threshold_seconds,
-            sync_window_seconds=4.0,
-            min_confidence_score=70.0,
+            sync_window_seconds=20.0,
+            min_confidence_score=65.0,
             max_valid_delay_seconds=45.0,
         )
 
