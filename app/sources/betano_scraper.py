@@ -15,6 +15,7 @@ from playwright.async_api import async_playwright, Page, Browser, BrowserContext
 
 from sources.base_source import BaseSource
 from core.normalizer import NormalizedEvent
+from core.optical_reader import OpticalScoreboardReader
 
 logger = logging.getLogger("betano_scraper")
 
@@ -76,6 +77,7 @@ class BetanoScraper(BaseSource):
         self._profile_suffix = self._load_profile_suffix()
         self._in_recovery = False
         self._debug_port = 9224
+        self._optical_reader = OpticalScoreboardReader()
 
     def get_name(self) -> str:
         return "betano"
