@@ -761,8 +761,31 @@ class Bet365Scraper(BaseSource):
                         }
                     }
 
-                    if (!bestFixture || bestScore < Math.max(1, Math.min(2, Math.floor(tokens.length / 2)))) {
-                        return { found: false };
+                    // Require at least 60% of tokens to match
+                    const minRequired = Math.max(2, Math.ceil(tokens.length * 0.6));
+                    if (!bestFixture || bestScore < minRequired) {
+                        return { found: false, reason: 'low_token_match', bestScore: bestScore, required: minRequired };
+                    }
+
+                    // ── Extract player names from the matched fixture for identity validation ──
+                    const nameSelectors = [
+                        '.ovm-FixtureName_Name',
+                        '[class*="ParticipantName"]',
+                        '[class*="TeamName"]',
+                        '[class*="FixtureDetailsTwoWay_TeamName"]',
+                        '[class*="Fixture"] [class*="Name"]',
+                    ];
+                    let matchedNames = [];
+                    for (const nSel of nameSelectors) {
+                        const nameEls = Array.from(bestFixture.querySelectorAll(nSel));
+                        const leafEls = nameEls.filter(el => el.querySelectorAll(nSel).length === 0);
+                        const validNames = leafEls
+                            .map(e => e.textContent.trim())
+                            .filter(t => t.length > 0 && !/^\\d+$/.test(t));
+                        if (validNames.length >= 2) {
+                            matchedNames = validNames.slice(0, 2);
+                            break;
+                        }
                     }
 
                     // Bring the fixture into center viewport so Bet365 DOM renders full score pills
@@ -806,13 +829,35 @@ class Bet365Scraper(BaseSource):
                         p1: p1Scores,
                         p2: p2Scores,
                         flat: flatScores,
+                        matched_names: matchedNames,
                         matched_score: bestScore
                     };
                 }
             """, tokens)
 
             if not data or not data.get("found"):
-                logger.warning(f"[DeepVerifier] Partida '{match_name}' não encontrada com precisão no DOM (tokens={tokens}).")
+                reason = data.get("reason", "unknown") if data else "no_data"
+                logger.warning(f"[DeepVerifier] Partida '{match_name}' não encontrada com precisão no DOM (tokens={tokens}, reason={reason}).")
+                return False
+
+            # ── Identity Validation: verify the fixture we found actually belongs to this match ──
+            matched_names = data.get('matched_names', [])
+            if matched_names:
+                fixture_text = ' '.join(matched_names).lower()
+                fixture_tokens = set(re.split(r'\s+', fixture_text))
+                expected_tokens = set(tokens)
+                overlap = len(fixture_tokens & expected_tokens)
+                total = len(expected_tokens)
+                ratio = overlap / total if total > 0 else 0
+                if ratio < 0.5:
+                    logger.warning(
+                        f"[DeepVerifier] ❌ IDENTIDADE NÃO CONFERE: Fixture DOM contém '{' vs '.join(matched_names)}' "
+                        f"mas esperávamos '{match_name}' (overlap={overlap}/{total}={ratio:.0%}). Descartando."
+                    )
+                    return False
+                logger.debug(f"[DeepVerifier] Identidade OK: '{' vs '.join(matched_names)}' matches {ratio:.0%} dos tokens.")
+            else:
+                logger.warning(f"[DeepVerifier] Nenhum nome de jogador extraído da fixture DOM para '{match_name}'. Descartando por segurança.")
                 return False
 
             p1 = data.get('p1', [])

@@ -83,7 +83,7 @@ class PointEventTracker:
     def __init__(
         self,
         state_cache: StateCache,
-        min_delay_seconds: float = 10.0,
+        min_delay_seconds: float = 20.0,
         sync_window_seconds: float = 20.0,
         min_confidence_score: float = 65.0,
         max_valid_delay_seconds: float = 120.0,
@@ -344,8 +344,8 @@ class PointEventTracker:
             b_points = b_gh + b_ga
             point_gap = c_points - b_points
 
-            # Valid point divergence: consensus strictly ahead in points in the active set without regression
-            is_ahead = (point_gap >= 1) and (c_gh >= b_gh) and (c_ga >= b_ga)
+            # Valid point divergence: consensus strictly ahead by 2+ points (1 point = normal latency)
+            is_ahead = (point_gap >= 2) and (c_gh >= b_gh) and (c_ga >= b_ga)
 
             active_event = self._active_events.get(match_id)
             ref_event = b365_ev or betano_ev or onexbet_ev or burger_ev or novibet_ev
@@ -357,7 +357,7 @@ class PointEventTracker:
 
                 # Skip if already completed recently (< 30s)
                 if event_key in self._completed_event_keys:
-                    if now - self._completed_event_keys[event_key] < 30.0:
+                    if now - self._completed_event_keys[event_key] < 60.0:
                         continue
 
                 if active_event is None:
