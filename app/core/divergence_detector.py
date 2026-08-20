@@ -69,6 +69,8 @@ class PointEvent:
     cancellation_reason: str = ""
     alert_sent: bool = False
     alert_timestamp: Optional[str] = None
+    last_notified_delay: float = 0.0
+    last_deep_verify_delay: float = 0.0
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -83,7 +85,7 @@ class PointEventTracker:
         min_delay_seconds: float = 10.0,
         sync_window_seconds: float = 20.0,
         min_confidence_score: float = 65.0,
-        max_valid_delay_seconds: float = 300.0,
+        max_valid_delay_seconds: float = 120.0,
     ):
         self.state_cache = state_cache
         self.min_delay_seconds = float(min_delay_seconds)
@@ -442,6 +444,17 @@ class PointEventTracker:
                         if is_first_alert:
                             self._alerted_transition_keys.add(trans_key)
 
+                        # Determine if Telegram notification should fire:
+                        # 1. First alert at >= 10s
+                        # 2. Every 5s interval of freeze thereafter (15s, 20s, 25s, 30s, ...)
+                        should_notify = False
+                        if is_first_alert or active_event.last_notified_delay == 0.0:
+                            should_notify = True
+                            active_event.last_notified_delay = delay_seconds
+                        elif (delay_seconds - active_event.last_notified_delay) >= 5.0:
+                            should_notify = True
+                            active_event.last_notified_delay = delay_seconds
+
                         active_event.status = EventStatus.ALERTA
                         active_event.alert_sent = True
                         active_event.alert_timestamp = now_dt.strftime("%H:%M:%S")
@@ -466,6 +479,14 @@ class PointEventTracker:
 
                         prio = "CRITICAL" if confidence >= 90 else "HIGH"
 
+                        # Determine if Deep Verification (open dedicated page on Bet365) should trigger:
+                        # At 30s and every 30s thereafter (60s, 90s, ...)
+                        needs_deep_verify = False
+                        if delay_seconds >= 30.0:
+                            if active_event.last_deep_verify_delay == 0.0 or (delay_seconds - active_event.last_deep_verify_delay) >= 30.0:
+                                needs_deep_verify = True
+                                active_event.last_deep_verify_delay = delay_seconds
+
                         alert_payload = {
                             "event_id": active_event.event_id,
                             "match_id": match_id,
@@ -485,7 +506,8 @@ class PointEventTracker:
                             "novibet_link": novibet_link,
                             "leading_houses": leading_display,
                             "is_update": not is_first_alert,
-                            "notify": is_first_alert,
+                            "notify": should_notify,
+                            "needs_deep_verification": needs_deep_verify,
                             "delay_seconds": round(delay_seconds, 1),
                             "confidence": round(confidence, 1),
                             "timestamp": now_dt.strftime("%H:%M:%S"),
@@ -537,7 +559,7 @@ class DivergenceDetector:
             min_delay_seconds=self.freeze_threshold_seconds,
             sync_window_seconds=20.0,
             min_confidence_score=65.0,
-            max_valid_delay_seconds=300.0,
+            max_valid_delay_seconds=120.0,
         )
 
     def check_divergences(self, target_match_id: Optional[str] = None) -> List[dict]:

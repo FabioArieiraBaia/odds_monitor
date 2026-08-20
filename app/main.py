@@ -380,21 +380,11 @@ async def broadcast_loop():
             # Check for divergences
             raw_alerts = detector.check_divergences()
             verified_alerts = []
-            needs_reload = False
             
             for alert in raw_alerts:
-                freeze_seconds = alert.get("delay_seconds", 0)
-                if alert.get("needs_verification") and freeze_seconds >= 14.0:
-                    time_since_reload = (datetime.now() - bet365_scraper._last_reload).total_seconds()
-                    if time_since_reload > 20.0:
-                        logger.warning(f"Suspected false positive for {alert['match_name']} (delay {freeze_seconds}s). Verifying...")
-                        needs_reload = True
-                        continue
-                        
+                if alert.get("needs_deep_verification"):
+                    asyncio.create_task(_run_deep_verification(alert))
                 verified_alerts.append(alert)
-
-            if needs_reload:
-                asyncio.create_task(bet365_scraper.force_hard_reload())
 
             # Broadcast alerts to frontend
             await manager.broadcast({
@@ -412,6 +402,40 @@ async def broadcast_loop():
             logger.error(f"Error in broadcast loop: {e}", exc_info=True)
             
         await asyncio.sleep(1.0)
+
+
+async def _run_deep_verification(alert: dict):
+    """
+    Segunda Camada de Verificação Profunda:
+    Aos 30s de travamento (e a cada 30s subsequentes), abre uma nova página/aba no bot da Bet365
+    para acessar diretamente os detalhes da partida e confirmar se o placar interno ainda está travado.
+    """
+    match_id = alert.get("match_id")
+    b365_url = alert.get("bet365_link")
+    if not match_id or not b365_url or not getattr(bet365_scraper, "context", None):
+        return
+
+    b365_ev = state_cache.get_event(match_id, "bet365")
+    burger_ev = state_cache.get_event(match_id, "betburger")
+    if not b365_ev or not burger_ev:
+        return
+
+    delay_sec = alert.get("delay_seconds", 30.0)
+    logger.info(f"🔍 [DEEP VERIFIER] Abrindo nova página aos {delay_sec:.1f}s para validar travamento real de {alert['match_name']}...")
+
+    try:
+        is_still_frozen = await bet365_scraper.verify_match_deep(b365_url, b365_ev, burger_ev)
+        if not is_still_frozen:
+            logger.info(f"❌ [DEEP VERIFIER] Falso positivo descartado pela nova página! Placar já atualizou. Cancelando alerta de {alert['match_name']}.")
+            detector.tracker._active_events.pop(match_id, None)
+            await manager.broadcast({
+                "type": "alerts",
+                "alerts": [a for a in detector.check_divergences() if a.get("match_id") != match_id]
+            })
+        else:
+            logger.info(f"✅ [DEEP VERIFIER] Travamento REAL confirmado pela nova página aberta para {alert['match_name']} ({delay_sec:.1f}s)!")
+    except Exception as e:
+        logger.warning(f"[DEEP VERIFIER] Erro ao abrir nova página de verificação: {e}")
 
 
 async def format_and_send_telegram(alert: dict):
