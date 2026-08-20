@@ -213,15 +213,15 @@ async def get_general_config():
 async def get_system_status():
     try:
         from main import state_cache, detector
-        all_events = state_cache.get_all_events()
         by_source = {}
-        for ev in all_events:
-            by_source[ev.source] = by_source.get(ev.source, 0) + 1
+        for m_id, sources in state_cache._cache.items():
+            for src_name in sources.keys():
+                by_source[src_name] = by_source.get(src_name, 0) + 1
         
         divergences = detector.check_divergences()
         return {
             "status": "ok",
-            "total_matches": len(state_cache.get_all_active_match_ids()),
+            "total_matches": len(state_cache._cache),
             "by_source": by_source,
             "active_divergences": len(divergences),
             "divergences": divergences
