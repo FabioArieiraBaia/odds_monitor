@@ -91,7 +91,9 @@ class NovibetScraper(BaseSource):
             except Exception:
                 pass
 
-            self._uc_driver = uc.Chrome(options=opts, headless=False, use_subprocess=True, version_main=chrome_major)
+            self._uc_driver = await asyncio.to_thread(
+                lambda: uc.Chrome(options=opts, headless=False, use_subprocess=True, version_main=chrome_major)
+            )
             await asyncio.sleep(3)
 
             dbg = (self._uc_driver.capabilities.get("goog:chromeOptions") or {}).get("debuggerAddress")

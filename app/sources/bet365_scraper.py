@@ -10,7 +10,7 @@ import logging
 import subprocess
 import os
 import time
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 from datetime import datetime
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
 from sources.base_source import BaseSource
@@ -123,11 +123,13 @@ class Bet365Scraper(BaseSource):
                 except Exception:
                     pass
 
-                self._uc_driver = uc.Chrome(options=options, headless=False, use_subprocess=True, version_main=chrome_major)
+                self._uc_driver = await asyncio.to_thread(
+                    lambda: uc.Chrome(options=options, headless=False, use_subprocess=True, version_main=chrome_major)
+                )
                 await asyncio.sleep(2)
                 
                 try:
-                    self._uc_driver.get("about:blank")
+                    await asyncio.to_thread(self._uc_driver.get, "about:blank")
                 except Exception:
                     pass
                     
