@@ -70,7 +70,8 @@ class PointEvent:
     alert_sent: bool = False
     alert_timestamp: Optional[str] = None
     last_notified_delay: float = 0.0
-    last_deep_verify_delay: float = 0.0
+    deep_verified: bool = False
+    deep_verification_pending: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -399,6 +400,7 @@ class PointEventTracker:
                 EventStatus.EVENTO_CONFIRMADO,
                 EventStatus.MONITORANDO_BET365,
                 EventStatus.ATRASO_CANDIDATO,
+                EventStatus.AGUARDANDO_CONFIRMACAO,
                 EventStatus.ALERTA,
             ):
                 # A. Check if Bet365 caught up
@@ -440,24 +442,34 @@ class PointEventTracker:
 
                     if confidence >= self.min_confidence_score:
                         trans_key = f"{match_id}:{active_event.previous_state}->{active_event.new_state}"
-                        is_first_alert = trans_key not in self._alerted_transition_keys
-                        if is_first_alert:
+                        is_first_transition = trans_key not in self._alerted_transition_keys
+                        if is_first_transition:
                             self._alerted_transition_keys.add(trans_key)
 
-                        # Determine if Telegram notification should fire:
-                        # 1. First alert at >= 10s
-                        # 2. Every 5s interval of freeze thereafter (15s, 20s, 25s, 30s, ...)
-                        should_notify = False
-                        if is_first_alert or active_event.last_notified_delay == 0.0:
-                            should_notify = True
-                            active_event.last_notified_delay = delay_seconds
-                        elif (delay_seconds - active_event.last_notified_delay) >= 5.0:
-                            should_notify = True
-                            active_event.last_notified_delay = delay_seconds
-
-                        active_event.status = EventStatus.ALERTA
-                        active_event.alert_sent = True
-                        active_event.alert_timestamp = now_dt.strftime("%H:%M:%S")
+                        # ── Deep Verification Gate (Confirm First on Dedicated Page) ──
+                        needs_deep_verify = False
+                        if not active_event.deep_verified:
+                            active_event.status = EventStatus.AGUARDANDO_CONFIRMACAO
+                            if not active_event.deep_verification_pending:
+                                needs_deep_verify = True
+                                active_event.deep_verification_pending = True
+                            should_notify = False
+                            is_first_alert = False
+                        else:
+                            active_event.status = EventStatus.ALERTA
+                            if not active_event.alert_sent:
+                                is_first_alert = True
+                                should_notify = True
+                                active_event.alert_sent = True
+                                active_event.alert_timestamp = now_dt.strftime("%H:%M:%S")
+                                active_event.last_notified_delay = delay_seconds
+                            elif (delay_seconds - active_event.last_notified_delay) >= 10.0:
+                                is_first_alert = False
+                                should_notify = True
+                                active_event.last_notified_delay = delay_seconds
+                            else:
+                                is_first_alert = False
+                                should_notify = False
 
                         b365_str = self._format_human_score(b365_ev, current_b365_state)
                         betano_str = self._format_human_score(betano_ev, parsed_states.get("betano"))
@@ -479,14 +491,6 @@ class PointEventTracker:
 
                         prio = "CRITICAL" if confidence >= 90 else "HIGH"
 
-                        # Determine if Deep Verification (open dedicated page on Bet365) should trigger:
-                        # At 30s and every 30s thereafter (60s, 90s, ...)
-                        needs_deep_verify = False
-                        if delay_seconds >= 30.0:
-                            if active_event.last_deep_verify_delay == 0.0 or (delay_seconds - active_event.last_deep_verify_delay) >= 30.0:
-                                needs_deep_verify = True
-                                active_event.last_deep_verify_delay = delay_seconds
-
                         alert_payload = {
                             "event_id": active_event.event_id,
                             "match_id": match_id,
@@ -505,9 +509,10 @@ class PointEventTracker:
                             "betano_link": betano_link,
                             "novibet_link": novibet_link,
                             "leading_houses": leading_display,
-                            "is_update": not is_first_alert,
+                            "is_update": not is_first_alert if active_event.deep_verified else False,
                             "notify": should_notify,
                             "needs_deep_verification": needs_deep_verify,
+                            "deep_verified": active_event.deep_verified,
                             "delay_seconds": round(delay_seconds, 1),
                             "confidence": round(confidence, 1),
                             "timestamp": now_dt.strftime("%H:%M:%S"),
@@ -518,11 +523,11 @@ class PointEventTracker:
 
                         alerts_to_emit.append(alert_payload)
 
-                        if is_first_alert:
+                        if is_first_alert and active_event.deep_verified:
                             # ── ⚡ Instant Hardware Audio Alert (< 0.05ms) ──
                             trigger_native_audio(prio)
                             logger.info(
-                                f"🚨 [ALERTA DISPARADO] {active_event.match_name} | "
+                                f"🚨 [ALERTA DISPARADO (VALIDADO NA PÁGINA)] {active_event.match_name} | "
                                 f"Atraso Bet365: {delay_seconds:.1f}s | Confiança: {confidence:.0f}% | "
                                 f"B365: {b365_str} | Consenso: {active_event.new_state} por {','.join(leading_display)}"
                             )

@@ -406,13 +406,14 @@ async def broadcast_loop():
 
 async def _run_deep_verification(alert: dict):
     """
-    Segunda Camada de Verificação Profunda:
-    Aos 30s de travamento (e a cada 30s subsequentes), abre uma nova página/aba no bot da Bet365
-    para acessar diretamente os detalhes da partida e confirmar se o placar interno ainda está travado.
+    Camada de Verificação Profunda:
+    Ao atingir os 10s de travamento, abre uma nova página/aba no bot da Bet365
+    para acessar diretamente os detalhes da partida e confirmar se o placar interno ainda está travado
+    ANTES de enviar o alerta final para o Telegram e emitir áudio.
     """
     match_id = alert.get("match_id")
-    b365_url = alert.get("bet365_link")
-    if not match_id or not b365_url or not getattr(bet365_scraper, "context", None):
+    b365_url = alert.get("bet365_link") or "https://www.bet365.bet.br/#/IP/B92"
+    if not match_id or not getattr(bet365_scraper, "context", None):
         return
 
     b365_ev = state_cache.get_event(match_id, "bet365")
@@ -420,11 +421,12 @@ async def _run_deep_verification(alert: dict):
     if not b365_ev or not burger_ev:
         return
 
-    delay_sec = alert.get("delay_seconds", 30.0)
+    delay_sec = alert.get("delay_seconds", 10.0)
     logger.info(f"🔍 [DEEP VERIFIER] Abrindo nova página aos {delay_sec:.1f}s para validar travamento real de {alert['match_name']}...")
 
     try:
         is_still_frozen = await bet365_scraper.verify_match_deep(b365_url, b365_ev, burger_ev)
+        ev = detector.tracker._active_events.get(match_id)
         if not is_still_frozen:
             logger.info(f"❌ [DEEP VERIFIER] Falso positivo descartado pela nova página! Placar já atualizou. Cancelando alerta de {alert['match_name']}.")
             detector.tracker._active_events.pop(match_id, None)
@@ -433,7 +435,25 @@ async def _run_deep_verification(alert: dict):
                 "alerts": [a for a in detector.check_divergences() if a.get("match_id") != match_id]
             })
         else:
-            logger.info(f"✅ [DEEP VERIFIER] Travamento REAL confirmado pela nova página aberta para {alert['match_name']} ({delay_sec:.1f}s)!")
+            logger.info(f"🎯 [DEEP VERIFIER] Travamento 100% REAL CONFIRMADO via página dedicada: {alert['match_name']} ({delay_sec:.1f}s)! Disparando alertas.")
+            if ev:
+                ev.deep_verified = True
+                ev.deep_verification_pending = False
+                from core.divergence_detector import EventStatus
+                ev.status = EventStatus.ALERTA
+                ev.alert_sent = True
+                ev.last_notified_delay = delay_sec
+                ev.alert_timestamp = datetime.now().strftime("%H:%M:%S")
+
+            from core.native_sound import trigger_native_audio
+            trigger_native_audio(alert.get("priority", "CRITICAL"))
+            alert["deep_verified"] = True
+            await format_and_send_telegram(alert)
+
+            await manager.broadcast({
+                "type": "alerts",
+                "alerts": detector.check_divergences()
+            })
     except Exception as e:
         logger.warning(f"[DEEP VERIFIER] Erro ao abrir nova página de verificação: {e}")
 

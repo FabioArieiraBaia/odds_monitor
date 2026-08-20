@@ -722,8 +722,8 @@ class Bet365Scraper(BaseSource):
         logger.info(f"[DeepVerifier] Checking real score for {b365_event.match_name} at {url}")
         page = await self.context.new_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=15000)
-            await asyncio.sleep(4) # Wait for scoreboard to render
+            await page.goto(url, wait_until="domcontentloaded", timeout=12000)
+            await asyncio.sleep(2) # Wait for scoreboard to render
             
             # Extract structured scoreboard columns and rows from match details page
             data = await page.evaluate("""
