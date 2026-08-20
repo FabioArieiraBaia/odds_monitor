@@ -38,12 +38,11 @@ def test_cache_and_detector():
     cache.update(event_burger)
     cache.update(event_bet365)
 
-    # 1. Single reference source advancing triggers immediately when freeze_threshold_seconds=0.0
+    # 1. Single reference source (BetBurger alone) MUST NOT trigger (waiting for 2nd house confirmation)
     divergences_single = detector.check_divergences()
-    assert len(divergences_single) == 1, "Single advancing reference source triggers when freeze_threshold=0"
-    assert divergences_single[0]["match_id"] == "silva vs haddouch"
+    assert len(divergences_single) == 0, "BetBurger alone without 2nd confirming house must NOT trigger alert"
 
-    # 2. Add second reference source (1xBet also confirms 5:4) -> Dual Validation!
+    # 2. Add second reference source (1xBet also confirms 5:4) -> Tríade Completa!
     event_1xbet = NormalizedEvent(
         match_id="silva vs haddouch",
         match_name="Silva vs Haddouch",
@@ -56,9 +55,9 @@ def test_cache_and_detector():
     )
     cache.update(event_1xbet)
 
-    # Detect dual confirmed divergence
+    # Detect dual confirmed divergence (BetBurger + 1xBet)
     divergences = detector.check_divergences()
-    assert len(divergences) == 1, "Dual confirmation (BetBurger + 1xBet) must maintain alert"
+    assert len(divergences) == 1, "Dual confirmation (BetBurger + 1xBet) must trigger alert"
     assert divergences[0]["match_id"] == "silva vs haddouch"
     assert "BET365" in divergences[0]["target_house"]
     assert divergences[0]["priority"] in ("CRITICAL", "HIGH")
@@ -124,7 +123,17 @@ def test_seven_seconds_freeze_rule():
         point_score="0",
         timestamp=now
     )
-    # 1xBet advances to Game 3:2
+    # BetBurger and 1xBet both advance to Game 3:2 (Triad formed!)
+    burger_ev = NormalizedEvent(
+        match_id="banot vs tyn",
+        match_name="Petr Banot vs Daniel Tyn",
+        sport="tabletennis",
+        source="betburger",
+        set_score="1:1",
+        game_score="3:2",
+        point_score="0",
+        timestamp=now
+    )
     xbet_ev = NormalizedEvent(
         match_id="banot vs tyn",
         match_name="Petr Banot vs Daniel Tyn",
@@ -136,6 +145,7 @@ def test_seven_seconds_freeze_rule():
         timestamp=now
     )
     cache.update(b365_ev)
+    cache.update(burger_ev)
     cache.update(xbet_ev)
 
     # 1. Immediate cycle: Point is detected, but 0.0s elapsed < 7.0s threshold -> NO ALERT
@@ -178,5 +188,74 @@ def test_seven_seconds_freeze_rule():
     alerts_after_sync = detector.check_divergences()
     assert len(alerts_after_sync) == 0, "Alert must clear when Bet365 catches up"
     assert "banot vs tyn" not in detector.tracker._active_events
+
+
+def test_triad_betburger_alone_rejected_and_dual_accepted():
+    """Verifies that BetBurger alone never alerts (even if frozen > 7s), but BetBurger + 2nd house alerts."""
+    cache = StateCache()
+    detector = DivergenceDetector(state_cache=cache, freeze_threshold_seconds=7.0, min_game_difference=1)
+    now = datetime.now()
+
+    # Exact scenario from user screenshot: Michal Malachowski x Mateusz Rutkowski
+    # Bet365: 1:1 | Set 3 (Set 0:0, Game 1:1)
+    # BetBurger: 2:1 | Set 3 (Set 0:0, Game 2:1)
+    # 1xBet: not found / missing
+    # Betano: not found / missing
+    b365_ev = NormalizedEvent(
+        match_id="malachowski vs rutkowski",
+        match_name="Michal Malachowski x Mateusz Rutkowski",
+        sport="tabletennis",
+        source="bet365",
+        set_score="1:1",
+        game_score="1:1",
+        point_score="0",
+        timestamp=now
+    )
+    burger_ev = NormalizedEvent(
+        match_id="malachowski vs rutkowski",
+        match_name="Michal Malachowski x Mateusz Rutkowski",
+        sport="tabletennis",
+        source="betburger",
+        set_score="1:1",
+        game_score="2:1",
+        point_score="0",
+        timestamp=now
+    )
+    cache.update(b365_ev)
+    cache.update(burger_ev)
+
+    # BetBurger alone: Even after 17 seconds delay -> ZERO ALERTS!
+    alerts = detector.check_divergences()
+    assert len(alerts) == 0, "BetBurger alone MUST NEVER trigger an alert"
+
+    # Now Betano ALSO confirms 2:1 | Set 3 -> 2 bets confirming (BetBurger + Betano)!
+    betano_ev = NormalizedEvent(
+        match_id="malachowski vs rutkowski",
+        match_name="Michal Malachowski x Mateusz Rutkowski",
+        sport="tabletennis",
+        source="betano",
+        set_score="1:1",
+        game_score="2:1",
+        point_score="0",
+        timestamp=now
+    )
+    cache.update(betano_ev)
+
+    # Initial check (0s elapsed) -> no alert yet
+    alerts = detector.check_divergences()
+    assert len(alerts) == 0, "No alert before 7s threshold"
+
+    # Fast-forward 8s delay with Triad active -> ALERT FIRES!
+    active_ev = detector.tracker._active_events.get("malachowski vs rutkowski")
+    assert active_ev is not None
+    active_ev.detected_at -= 8.0
+    if active_ev.confirmed_at:
+        active_ev.confirmed_at -= 8.0
+
+    alerts_8s = detector.check_divergences()
+    assert len(alerts_8s) == 1, "Alert must fire when BetBurger + 2nd house confirm and delay >= 7s"
+    assert "BetBurger" in alerts_8s[0]["leading_houses"]
+    assert "Betano" in alerts_8s[0]["leading_houses"]
+
 
 

@@ -83,7 +83,7 @@ class PointEventTracker:
         min_delay_seconds: float = 7.0,
         sync_window_seconds: float = 20.0,
         min_confidence_score: float = 65.0,
-        max_valid_delay_seconds: float = 35.0,
+        max_valid_delay_seconds: float = 25.0,
     ):
         self.state_cache = state_cache
         self.min_delay_seconds = float(min_delay_seconds)
@@ -171,41 +171,29 @@ class PointEventTracker:
         set_h, set_a, _, _ = state
         return max(set_h, set_a) >= 3
 
-    # ── Multi-Source Consensus ──
+    # ── Multi-Source Consensus (Tríade: BetBurger Obrigatório + Mínimo 1 Casa de Confirmação) ──
 
     def _determine_consensus(
         self,
         ref_states: Dict[str, Tuple[int, int, int, int]],
         now: float
     ) -> Tuple[Optional[Tuple[int, int, int, int]], List[str]]:
-        if not ref_states:
+        if not ref_states or "betburger" not in ref_states:
             return None, []
 
-        state_counts: Dict[Tuple[int, int, int, int], List[str]] = {}
+        bb_state = ref_states["betburger"]
+        confirming_sources = ["betburger"]
+
+        # Verifica quais outras casas (1xBet, Betano, Novibet) concordam exatamente com o BetBurger
         for src, st in ref_states.items():
-            if st not in state_counts:
-                state_counts[st] = []
-            state_counts[st].append(src)
+            if src != "betburger" and st == bb_state:
+                confirming_sources.append(src)
 
-        # 1. Multi-source consensus: >= 2 reference sources agreeing on the same score
-        for st, srcs in state_counts.items():
-            if len(srcs) >= 2:
-                return st, srcs
+        # Regra de Ouro da Tríade: BetBurger + no mínimo 1 outra casa confirmadora (total >= 2)
+        if len(confirming_sources) >= 2:
+            return bb_state, confirming_sources
 
-        # 2. Single trusted source advancing: pick the most advanced valid reference state
-        best_state = None
-        best_progress = -1
-        best_srcs = []
-        for st, srcs in state_counts.items():
-            prog = self._state_progress(st)
-            if prog > best_progress:
-                best_progress = prog
-                best_state = st
-                best_srcs = srcs
-
-        if best_state is not None:
-            return best_state, best_srcs
-
+        # Sem confirmação da 2ª casa -> Zero Alerta (rejeição de falso positivo)
         return None, []
 
     # ── Confidence Scoring (0-100) ──
@@ -549,7 +537,7 @@ class DivergenceDetector:
             min_delay_seconds=self.freeze_threshold_seconds,
             sync_window_seconds=20.0,
             min_confidence_score=65.0,
-            max_valid_delay_seconds=35.0,
+            max_valid_delay_seconds=25.0,
         )
 
     def check_divergences(self, target_match_id: Optional[str] = None) -> List[dict]:
