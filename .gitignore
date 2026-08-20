@@ -16,3 +16,4 @@ venv/
 app/venv/
 .pytest_cache/
 app/.pytest_cache/
+*.log

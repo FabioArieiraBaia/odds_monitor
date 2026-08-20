@@ -261,6 +261,10 @@ async function loadSavedConfigs() {
         if (bbData.status === 'ok') {
             if (bbEmailInput && bbData.email) bbEmailInput.value = bbData.email;
             if (bbPasswordInput && bbData.password_set) bbPasswordInput.value = "********";
+            if (toggleBet365 && typeof bbData.enable_bet365 === 'boolean') toggleBet365.checked = bbData.enable_bet365;
+            if (toggleBetburger && typeof bbData.enable_betburger === 'boolean') toggleBetburger.checked = bbData.enable_betburger;
+            if (toggleBetano && typeof bbData.enable_betano === 'boolean') toggleBetano.checked = bbData.enable_betano;
+            if (freezeThresholdInput && bbData.freeze_threshold_seconds) freezeThresholdInput.value = bbData.freeze_threshold_seconds;
         }
     } catch (e) {
         console.debug('Error loading saved configs:', e);
@@ -292,7 +296,7 @@ if (saveScrapersBtn) {
         const enable_bet365 = toggleBet365 ? toggleBet365.checked : true;
         const enable_betburger = toggleBetburger ? toggleBetburger.checked : true;
         const enable_betano = toggleBetano ? toggleBetano.checked : true;
-        const freeze_threshold_seconds = parseFloat(freezeThresholdInput ? freezeThresholdInput.value : 5.0) || 5.0;
+        const freeze_threshold_seconds = parseFloat(freezeThresholdInput ? freezeThresholdInput.value : 7.0) || 7.0;
         
         try {
             const response = await fetch('/api/config/scrapers', {

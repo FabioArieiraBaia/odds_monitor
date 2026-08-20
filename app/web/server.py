@@ -90,7 +90,7 @@ class ScrapersConfigRequest(BaseModel):
     enable_bet365: bool
     enable_betburger: bool
     enable_betano: bool
-    freeze_threshold_seconds: float = Field(default=8.0, ge=1.0, le=60.0)
+    freeze_threshold_seconds: float = Field(default=7.0, ge=1.0, le=60.0)
 
 
 @app.get("/api/config")
@@ -98,6 +98,7 @@ async def get_config():
     from config import settings
     masked_token = "********" if settings.TELEGRAM_BOT_TOKEN else ""
     return {
+        "status": "ok",
         "email": settings.BETBURGER_EMAIL,
         "telegram_token": masked_token,
         "telegram_chat_id": settings.TELEGRAM_CHAT_ID,

@@ -80,10 +80,10 @@ class PointEventTracker:
     def __init__(
         self,
         state_cache: StateCache,
-        min_delay_seconds: float = 8.0,
+        min_delay_seconds: float = 7.0,
         sync_window_seconds: float = 20.0,
         min_confidence_score: float = 65.0,
-        max_valid_delay_seconds: float = 45.0,
+        max_valid_delay_seconds: float = 35.0,
     ):
         self.state_cache = state_cache
         self.min_delay_seconds = float(min_delay_seconds)
@@ -187,12 +187,25 @@ class PointEventTracker:
                 state_counts[st] = []
             state_counts[st].append(src)
 
-        # 1. Strict Dual Validation: Requires >= 2 independent reference sources agreeing AND BetBurger must be in consensus
+        # 1. Multi-source consensus: >= 2 reference sources agreeing on the same score
         for st, srcs in state_counts.items():
-            if len(srcs) >= 2 and "betburger" in srcs:
+            if len(srcs) >= 2:
                 return st, srcs
 
-        # No alerts allowed without BetBurger as base reference + second independent source
+        # 2. Single trusted source advancing: pick the most advanced valid reference state
+        best_state = None
+        best_progress = -1
+        best_srcs = []
+        for st, srcs in state_counts.items():
+            prog = self._state_progress(st)
+            if prog > best_progress:
+                best_progress = prog
+                best_state = st
+                best_srcs = srcs
+
+        if best_state is not None:
+            return best_state, best_srcs
+
         return None, []
 
     # ── Confidence Scoring (0-100) ──
@@ -213,7 +226,7 @@ class PointEventTracker:
         elif num_confirming >= 2:
             score += 45.0
         elif num_confirming == 1:
-            score += 25.0
+            score += 35.0
 
         # Feed freshness / health of confirming sources
         fresh_sources = 0
@@ -524,7 +537,7 @@ class DivergenceDetector:
     def __init__(
         self,
         state_cache: StateCache,
-        freeze_threshold_seconds: float = 8.0,
+        freeze_threshold_seconds: float = 7.0,
         min_game_difference: int = 1,
     ):
         self.state_cache = state_cache
@@ -536,7 +549,7 @@ class DivergenceDetector:
             min_delay_seconds=self.freeze_threshold_seconds,
             sync_window_seconds=20.0,
             min_confidence_score=65.0,
-            max_valid_delay_seconds=45.0,
+            max_valid_delay_seconds=35.0,
         )
 
     def check_divergences(self, target_match_id: Optional[str] = None) -> List[dict]:
