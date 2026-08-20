@@ -552,8 +552,8 @@ class DivergenceDetector:
     def __init__(
         self,
         state_cache: StateCache,
-        freeze_threshold_seconds: float = 10.0,
-        min_game_difference: int = 1,
+        freeze_threshold_seconds: float = 20.0,
+        min_game_difference: int = 2,
     ):
         self.state_cache = state_cache
         self.freeze_threshold_seconds = freeze_threshold_seconds
