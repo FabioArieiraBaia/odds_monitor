@@ -209,6 +209,27 @@ async def get_general_config():
     }
 
 
+@app.get("/api/status")
+async def get_system_status():
+    try:
+        from main import state_cache, detector
+        all_events = state_cache.get_all_events()
+        by_source = {}
+        for ev in all_events:
+            by_source[ev.source] = by_source.get(ev.source, 0) + 1
+        
+        divergences = detector.check_divergences()
+        return {
+            "status": "ok",
+            "total_matches": len(state_cache.get_all_active_match_ids()),
+            "by_source": by_source,
+            "active_divergences": len(divergences),
+            "divergences": divergences
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 class OpenBet365Request(BaseModel):
     match_name: str
     match_id: str = ""
