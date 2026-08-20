@@ -87,6 +87,38 @@ def match_similarity(name1: str, name2: str) -> float:
     return _match_similarity_cached(name1, name2)
 
 
+def are_sides_swapped(ref_name: str, candidate_name: str) -> bool:
+    """Returns True if candidate_name has Home and Away swapped relative to ref_name."""
+    s1 = _sides(ref_name)
+    s2 = _sides(candidate_name)
+    if not s1 or not s2:
+        return False
+    a0, a1 = s1[0], s1[1]
+    b0, b1 = s2[0], s2[1]
+    direct = (_side_overlap(a0, b0) + _side_overlap(a1, b1)) / 2.0
+    swapped = (_side_overlap(a0, b1) + _side_overlap(a1, b0)) / 2.0
+    return swapped > direct and swapped >= 0.5
+
+
+def _flip_score_str(score_str: str) -> str:
+    """Flips 'X:Y' or 'X-Y' to 'Y:X'."""
+    if not score_str:
+        return score_str
+    parts = re.split(r"[:\-]", score_str.strip())
+    if len(parts) == 2:
+        return f"{parts[1].strip()}:{parts[0].strip()}"
+    return score_str
+
+
+def _flip_event_orientation(ev: NormalizedEvent, target_name: str):
+    """Flips score and aligns name for a swapped event."""
+    ev.set_score = _flip_score_str(ev.set_score)
+    ev.game_score = _flip_score_str(ev.game_score)
+    if ev.extra_data and "home_odd" in ev.extra_data and "away_odd" in ev.extra_data:
+        ev.extra_data["home_odd"], ev.extra_data["away_odd"] = ev.extra_data["away_odd"], ev.extra_data["home_odd"]
+    ev.match_name = target_name
+
+
 class StateCache:
     def __init__(self, match_threshold: float = 0.72):
         # { match_id: { "bet365": NormalizedEvent, "1xbet": ..., "betburger": ..., "betano": ... } }
@@ -188,7 +220,20 @@ class StateCache:
 
         event.match_id = canonical_id
 
-        # 2. Check for score change and previous state
+        # 2. Check and align Home/Away player orientation
+        if canonical_id in self._cache and self._cache[canonical_id]:
+            ref_ev = self._cache[canonical_id].get("bet365") or next(iter(self._cache[canonical_id].values()), None)
+            if ref_ev and ref_ev.match_name:
+                if source != "bet365":
+                    if are_sides_swapped(ref_ev.match_name, event.match_name):
+                        _flip_event_orientation(event, ref_ev.match_name)
+                else:
+                    # Bet365 is the gold standard orientation. Re-align existing sources if needed.
+                    for other_src, other_ev in list(self._cache[canonical_id].items()):
+                        if other_src != "bet365" and are_sides_swapped(event.match_name, other_ev.match_name):
+                            _flip_event_orientation(other_ev, event.match_name)
+
+        # 3. Check for score change and previous state
         if canonical_id not in self._cache:
             self._cache[canonical_id] = {}
             self._last_changed[canonical_id] = {}

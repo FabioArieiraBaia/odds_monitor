@@ -207,7 +207,7 @@ async def bet365_loop():
         except Exception as e:
             logger.error(f"[Loop] Bet365 scraper loop error: {e}")
         
-        await asyncio.sleep(max(1, settings.POLLING_INTERVAL_SECONDS))
+        await asyncio.sleep(0.8)
 
 
 async def onexbet_loop():
@@ -237,7 +237,7 @@ async def onexbet_loop():
         except Exception as e:
             logger.error(f"[Loop] 1xBet scraper loop error: {e}")
         
-        await asyncio.sleep(max(1, settings.POLLING_INTERVAL_SECONDS))
+        await asyncio.sleep(1.0)
 
 
 async def betburger_loop():
@@ -273,7 +273,7 @@ async def betburger_loop():
             _burger_started = False
             await asyncio.sleep(5)
         
-        await asyncio.sleep(max(1, settings.POLLING_INTERVAL_SECONDS))
+        await asyncio.sleep(1.5)
 
 
 async def betano_loop():
@@ -308,7 +308,7 @@ async def betano_loop():
         except Exception as e:
             logger.error(f"[Loop] Betano scraper loop error: {e}")
         
-        await asyncio.sleep(max(1, settings.POLLING_INTERVAL_SECONDS))
+        await asyncio.sleep(2.0)
 
 
 async def novibet_loop():

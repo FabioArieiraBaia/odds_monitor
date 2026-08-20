@@ -61,3 +61,47 @@ def test_cache_and_detector():
     assert divergences[0]["match_id"] == "silva vs haddouch"
     assert "BET365" in divergences[0]["target_house"]
     assert divergences[0]["priority"] in ("CRITICAL", "HIGH")
+
+
+def test_home_away_swapped_alignment():
+    """Validates that when a reference house lists players in inverted order, scores auto-align."""
+    cache = StateCache()
+    detector = DivergenceDetector(state_cache=cache, freeze_threshold_seconds=0.0, min_game_difference=1)
+    now = datetime.now()
+
+    # Bet365: Silva vs Haddouch | Set 1:0 | Game 8:4
+    event_b365 = NormalizedEvent(
+        match_id="raw_b365_1",
+        match_name="Silva vs Haddouch",
+        sport="tabletennis",
+        source="bet365",
+        set_score="1:0",
+        game_score="8:4",
+        point_score="0",
+        timestamp=now
+    )
+    cache.update(event_b365)
+
+    # 1xBet: Haddouch vs Silva (SWAPPED!) | Set 0:1 | Game 4:8 (Actual same score!)
+    event_1xbet = NormalizedEvent(
+        match_id="raw_1x_1",
+        match_name="Haddouch vs Silva",
+        sport="tabletennis",
+        source="1xbet",
+        set_score="0:1",
+        game_score="4:8",
+        point_score="0",
+        timestamp=now
+    )
+    cache.update(event_1xbet)
+
+    # 1xBet event in cache must be automatically flipped to Set 1:0, Game 8:4
+    stored_1x = cache.get_event(event_b365.match_id, "1xbet")
+    assert stored_1x is not None
+    assert stored_1x.set_score == "1:0", f"Expected set 1:0 but got {stored_1x.set_score}"
+    assert stored_1x.game_score == "8:4", f"Expected game 8:4 but got {stored_1x.game_score}"
+
+    # No false divergence must occur since both houses are actually on the exact same score
+    divergences = detector.check_divergences()
+    assert len(divergences) == 0, "Swapped order must be aligned and produce ZERO false divergence"
+

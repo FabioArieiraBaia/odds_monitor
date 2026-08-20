@@ -330,20 +330,23 @@ class PointEventTracker:
 
             c_sh, c_sa, c_gh, c_ga = consensus_state
             b_sh, b_sa, b_gh, b_ga = current_b365_state
-            c_sets = c_sh + c_sa
-            b_sets = b_sh + b_sa
 
-            # Reject set break intervals (new set at 0:0 while players are resting/switching sides)
-            if c_sets > b_sets and (c_gh + c_ga) == 0:
+            # 1. Require identical set score (e.g. Set 1:1 vs Set 1:1) to avoid set-break / interval pauses
+            if (c_sh, c_sa) != (b_sh, b_sa):
                 continue
+
+            # 2. Check if reference consensus is strictly ahead in points in the current set
+            c_points = c_gh + c_ga
+            b_points = b_gh + b_ga
+            point_gap = c_points - b_points
+
+            # Valid point divergence: ahead by 1 to 4 points in the active set without regression
+            is_ahead = (point_gap >= 1) and (point_gap <= 4) and (c_gh >= b_gh) and (c_ga >= b_ga)
 
             active_event = self._active_events.get(match_id)
             ref_event = b365_ev or betano_ev or onexbet_ev or burger_ev or novibet_ev
             display_name = ref_event.match_name if ref_event else match_id
             league = (ref_event.extra_data.get("league", "") if ref_event and ref_event.extra_data else "") or ""
-
-            # Check if reference consensus is strictly ahead of Bet365
-            is_ahead = self._state_progress(consensus_state) > self._state_progress(current_b365_state)
 
             if is_ahead:
                 event_key = f"{match_id}:{current_b365_state}->{consensus_state}"
