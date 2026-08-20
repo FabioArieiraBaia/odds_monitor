@@ -424,22 +424,36 @@ class Bet365Scraper(BaseSource):
                             const matchName = names.join(' vs ');
                             if (matchName.length < 3) continue;
                             
-                            // ── Extract scores ──
+                            // ── Extract scores (Row-by-Row Isolation) ──
                             function isVisible(el) {
                                 if (el.offsetParent !== null) return true;
                                 const rect = el.getBoundingClientRect();
                                 return rect.width > 0 && rect.height > 0;
                             }
                             
-                            // Target all individual score pill elements
-                            const scorePills = Array.from(fixture.querySelectorAll('.ovm-ScorePill'))
-                                .filter(isVisible);
-                                
                             let p1Scores = [];
                             let p2Scores = [];
-                            
-                            if (scorePills.length > 0) {
-                                // Group score pills by their parent (column wrapper)
+
+                            const partRows = Array.from(fixture.querySelectorAll(
+                                '.ovm-FixtureNormalDetails, [class*="ParticipantDetails"], .ovm-Participant, [class*="ParticipantRow"], [class*="rcl-ParticipantFixtureDetails"]'
+                            ));
+
+                            if (partRows.length >= 2) {
+                                const p1Cells = Array.from(partRows[0].querySelectorAll('[class*="Score"], [class*="Cell"], [class*="Point"], [class*="Pill"], .ovm-ScoreWrapper_Score, .ovm-ScorePill'))
+                                    .filter(el => el.children.length === 0);
+                                const p2Cells = Array.from(partRows[1].querySelectorAll('[class*="Score"], [class*="Cell"], [class*="Point"], [class*="Pill"], .ovm-ScoreWrapper_Score, .ovm-ScorePill'))
+                                    .filter(el => el.children.length === 0);
+
+                                p1Scores = p1Cells.map(c => c.textContent.trim()).filter(t => /^\\d+$/.test(t) || /^[Aa]d?v?$/.test(t));
+                                p2Scores = p2Cells.map(c => c.textContent.trim()).filter(t => /^\\d+$/.test(t) || /^[Aa]d?v?$/.test(t));
+                            }
+
+                            // Fallback to column grouping if row split was not detected
+                            if (p1Scores.length === 0 && p2Scores.length === 0) {
+                                const scorePills = Array.from(fixture.querySelectorAll('[class*="Score"], [class*="score"], .ovm-ScorePill, .ovm-ScoreWrapper_Score'))
+                                    .filter(isVisible)
+                                    .filter(el => el.children.length === 0);
+                                    
                                 const parentMap = new Map();
                                 for (const pill of scorePills) {
                                     const parent = pill.parentElement;
@@ -470,7 +484,6 @@ class Bet365Scraper(BaseSource):
                                 );
                                 for (const el of scoreEls) {
                                     if (!isVisible(el)) continue;
-                                    // ONLY target leaf nodes to avoid concatenated parent texts
                                     if (el.children.length > 0) continue;
                                     const t = el.textContent.trim();
                                     if (/^\d+$/.test(t) || /^[Aa]d?v?$/.test(t)) {
@@ -752,26 +765,33 @@ class Bet365Scraper(BaseSource):
                         return { found: false };
                     }
 
+                    // Bring the fixture into center viewport so Bet365 DOM renders full score pills
+                    try {
+                        bestFixture.scrollIntoView({ block: 'center', behavior: 'instant' });
+                    } catch (e) {}
+
                     // Extract score rows specifically from this matched fixture
                     const participantRows = Array.from(bestFixture.querySelectorAll(
-                        '.ovm-FixtureNormalDetails, [class*="ParticipantDetails"], .ovm-Participant, [class*="ParticipantRow"]'
+                        '.ovm-FixtureNormalDetails, [class*="ParticipantDetails"], .ovm-Participant, [class*="ParticipantRow"], [class*="rcl-ParticipantFixtureDetails"]'
                     ));
 
                     let p1Scores = [];
                     let p2Scores = [];
 
                     if (participantRows.length >= 2) {
-                        const p1Cells = participantRows[0].querySelectorAll('[class*="Score"], [class*="Cell"], [class*="Point"], [class*="Pill"]');
-                        const p2Cells = participantRows[1].querySelectorAll('[class*="Score"], [class*="Cell"], [class*="Point"], [class*="Pill"]');
+                        const p1Cells = Array.from(participantRows[0].querySelectorAll('[class*="Score"], [class*="Cell"], [class*="Point"], [class*="Pill"], .ovm-ScoreWrapper_Score, .ovm-ScorePill'))
+                            .filter(el => el.children.length === 0);
+                        const p2Cells = Array.from(participantRows[1].querySelectorAll('[class*="Score"], [class*="Cell"], [class*="Point"], [class*="Pill"], .ovm-ScoreWrapper_Score, .ovm-ScorePill'))
+                            .filter(el => el.children.length === 0);
 
-                        p1Scores = Array.from(p1Cells).map(c => c.textContent.trim()).filter(t => /^\\d+$/.test(t) || /^[Aa]d?v?$/.test(t));
-                        p2Scores = Array.from(p2Cells).map(c => c.textContent.trim()).filter(t => /^\\d+$/.test(t) || /^[Aa]d?v?$/.test(t));
+                        p1Scores = p1Cells.map(c => c.textContent.trim()).filter(t => /^\\d+$/.test(t) || /^[Aa]d?v?$/.test(t));
+                        p2Scores = p2Cells.map(c => c.textContent.trim()).filter(t => /^\\d+$/.test(t) || /^[Aa]d?v?$/.test(t));
                     }
 
                     // Fallback to score elements inside this specific fixture
                     let flatScores = [];
                     if (p1Scores.length === 0 && p2Scores.length === 0) {
-                        const scoreEls = bestFixture.querySelectorAll('[class*="Score"], [class*="score"], .ovm-ScoreWrapper_Score');
+                        const scoreEls = bestFixture.querySelectorAll('[class*="Score"], [class*="score"], .ovm-ScoreWrapper_Score, .ovm-ScorePill');
                         for (const el of scoreEls) {
                             if (el.children.length > 0) continue;
                             const t = el.textContent.trim();
