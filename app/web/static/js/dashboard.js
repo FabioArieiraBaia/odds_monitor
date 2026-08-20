@@ -296,7 +296,7 @@ if (saveScrapersBtn) {
         const enable_bet365 = toggleBet365 ? toggleBet365.checked : true;
         const enable_betburger = toggleBetburger ? toggleBetburger.checked : true;
         const enable_betano = toggleBetano ? toggleBetano.checked : true;
-        const freeze_threshold_seconds = parseFloat(freezeThresholdInput ? freezeThresholdInput.value : 7.0) || 7.0;
+        const freeze_threshold_seconds = parseFloat(freezeThresholdInput ? freezeThresholdInput.value : 10.0) || 10.0;
         
         try {
             const response = await fetch('/api/config/scrapers', {

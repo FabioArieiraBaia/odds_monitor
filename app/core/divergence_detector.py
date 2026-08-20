@@ -80,10 +80,10 @@ class PointEventTracker:
     def __init__(
         self,
         state_cache: StateCache,
-        min_delay_seconds: float = 7.0,
+        min_delay_seconds: float = 10.0,
         sync_window_seconds: float = 20.0,
         min_confidence_score: float = 65.0,
-        max_valid_delay_seconds: float = 25.0,
+        max_valid_delay_seconds: float = 30.0,
     ):
         self.state_cache = state_cache
         self.min_delay_seconds = float(min_delay_seconds)
@@ -525,7 +525,7 @@ class DivergenceDetector:
     def __init__(
         self,
         state_cache: StateCache,
-        freeze_threshold_seconds: float = 7.0,
+        freeze_threshold_seconds: float = 10.0,
         min_game_difference: int = 1,
     ):
         self.state_cache = state_cache
@@ -537,7 +537,7 @@ class DivergenceDetector:
             min_delay_seconds=self.freeze_threshold_seconds,
             sync_window_seconds=20.0,
             min_confidence_score=65.0,
-            max_valid_delay_seconds=25.0,
+            max_valid_delay_seconds=30.0,
         )
 
     def check_divergences(self, target_match_id: Optional[str] = None) -> List[dict]:

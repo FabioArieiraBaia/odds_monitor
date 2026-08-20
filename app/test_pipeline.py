@@ -106,10 +106,10 @@ def test_home_away_swapped_alignment():
     assert len(divergences) == 0, "Swapped order must be aligned and produce ZERO false divergence"
 
 
-def test_seven_seconds_freeze_rule():
-    """Validates the strict 7.0s freeze rule: no alert under 7s, alert at >= 7s, auto-clear on catch-up."""
+def test_ten_seconds_freeze_rule():
+    """Validates the strict 10.0s freeze rule: no alert under 10s, alert at >= 10s, auto-clear on catch-up."""
     cache = StateCache()
-    detector = DivergenceDetector(state_cache=cache, freeze_threshold_seconds=7.0, min_game_difference=1)
+    detector = DivergenceDetector(state_cache=cache, freeze_threshold_seconds=10.0, min_game_difference=1)
     now = datetime.now()
 
     # Bet365 is at Set 1:1, Game 2:2
@@ -148,30 +148,30 @@ def test_seven_seconds_freeze_rule():
     cache.update(burger_ev)
     cache.update(xbet_ev)
 
-    # 1. Immediate cycle: Point is detected, but 0.0s elapsed < 7.0s threshold -> NO ALERT
+    # 1. Immediate cycle: Point is detected, but 0.0s elapsed < 10.0s threshold -> NO ALERT
     alerts = detector.check_divergences()
-    assert len(alerts) == 0, "Should not alert immediately (< 7.0s)"
+    assert len(alerts) == 0, "Should not alert immediately (< 10.0s)"
 
     # Verify event is in active tracking
     active_ev = detector.tracker._active_events.get("banot vs tyn")
     assert active_ev is not None, "Event must be actively tracked"
 
-    # 2. Simulate 5.0 seconds elapsed (< 7.0s) -> NO ALERT
-    active_ev.detected_at -= 5.0
+    # 2. Simulate 8.0 seconds elapsed (< 10.0s) -> NO ALERT
+    active_ev.detected_at -= 8.0
     if active_ev.confirmed_at:
-        active_ev.confirmed_at -= 5.0
-    alerts_5s = detector.check_divergences()
-    assert len(alerts_5s) == 0, "Should not alert at 5.0s (< 7.0s)"
+        active_ev.confirmed_at -= 8.0
+    alerts_8s = detector.check_divergences()
+    assert len(alerts_8s) == 0, "Should not alert at 8.0s (< 10.0s)"
 
-    # 3. Simulate 7.1 seconds elapsed (>= 7.0s) -> ALERT FIRES!
+    # 3. Simulate 10.2 seconds elapsed (>= 10.0s) -> ALERT FIRES!
     active_ev.detected_at -= 2.2
     if active_ev.confirmed_at:
         active_ev.confirmed_at -= 2.2
-    alerts_7s = detector.check_divergences()
-    assert len(alerts_7s) == 1, "Alert must fire when Bet365 has been frozen for >= 7.0s"
-    assert alerts_7s[0]["match_name"] == "Petr Banot vs Daniel Tyn"
-    assert alerts_7s[0]["target_house"] == "BET365"
-    assert alerts_7s[0]["delay_seconds"] >= 7.0
+    alerts_10s = detector.check_divergences()
+    assert len(alerts_10s) == 1, "Alert must fire when Bet365 has been frozen for >= 10.0s"
+    assert alerts_10s[0]["match_name"] == "Petr Banot vs Daniel Tyn"
+    assert alerts_10s[0]["target_house"] == "BET365"
+    assert alerts_10s[0]["delay_seconds"] >= 10.0
 
     # 4. Bet365 catches up to 3:2 -> Divergence resolves and clears
     b365_synced = NormalizedEvent(
@@ -191,9 +191,9 @@ def test_seven_seconds_freeze_rule():
 
 
 def test_triad_betburger_alone_rejected_and_dual_accepted():
-    """Verifies that BetBurger alone never alerts (even if frozen > 7s), but BetBurger + 2nd house alerts."""
+    """Verifies that BetBurger alone never alerts (even if frozen > 10s), but BetBurger + 2nd house alerts."""
     cache = StateCache()
-    detector = DivergenceDetector(state_cache=cache, freeze_threshold_seconds=7.0, min_game_difference=1)
+    detector = DivergenceDetector(state_cache=cache, freeze_threshold_seconds=10.0, min_game_difference=1)
     now = datetime.now()
 
     # Exact scenario from user screenshot: Michal Malachowski x Mateusz Rutkowski
@@ -243,19 +243,19 @@ def test_triad_betburger_alone_rejected_and_dual_accepted():
 
     # Initial check (0s elapsed) -> no alert yet
     alerts = detector.check_divergences()
-    assert len(alerts) == 0, "No alert before 7s threshold"
+    assert len(alerts) == 0, "No alert before 10s threshold"
 
-    # Fast-forward 8s delay with Triad active -> ALERT FIRES!
+    # Fast-forward 10.5s delay with Triad active -> ALERT FIRES!
     active_ev = detector.tracker._active_events.get("malachowski vs rutkowski")
     assert active_ev is not None
-    active_ev.detected_at -= 8.0
+    active_ev.detected_at -= 10.5
     if active_ev.confirmed_at:
-        active_ev.confirmed_at -= 8.0
+        active_ev.confirmed_at -= 10.5
 
-    alerts_8s = detector.check_divergences()
-    assert len(alerts_8s) == 1, "Alert must fire when BetBurger + 2nd house confirm and delay >= 7s"
-    assert "BetBurger" in alerts_8s[0]["leading_houses"]
-    assert "Betano" in alerts_8s[0]["leading_houses"]
+    alerts_10s = detector.check_divergences()
+    assert len(alerts_10s) == 1, "Alert must fire when BetBurger + 2nd house confirm and delay >= 10s"
+    assert "BetBurger" in alerts_10s[0]["leading_houses"]
+    assert "Betano" in alerts_10s[0]["leading_houses"]
 
 
 
