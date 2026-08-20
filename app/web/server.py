@@ -136,7 +136,7 @@ async def save_scrapers_config(payload: ScrapersConfigRequest):
 
         # Keep running detector in sync with UI threshold
         try:
-            from main import detector
+            from core.instances import detector
             detector.freeze_threshold_seconds = float(payload.freeze_threshold_seconds)
         except Exception:
             pass
@@ -212,7 +212,7 @@ async def get_general_config():
 @app.get("/api/status")
 async def get_system_status():
     try:
-        from main import state_cache, detector
+        from core.instances import state_cache, detector
         by_source = {}
         for m_id, sources in state_cache._cache.items():
             for src_name in sources.keys():
@@ -241,7 +241,7 @@ async def open_bet365_match(payload: OpenBet365Request):
     Open the correct Bet365 fixture in the scraper Chrome window.
     """
     try:
-        from main import bet365_scraper, state_cache
+        from core.instances import bet365_scraper, state_cache
         name = (payload.match_name or "").strip()
         if payload.match_id:
             ev = state_cache.get_event(payload.match_id, "bet365")
