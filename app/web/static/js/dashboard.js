@@ -640,8 +640,9 @@ function applyScoreFlashClasses(matches) {
 // ════════════════════════════════════════════
 // ALERTS
 // ════════════════════════════════════════════
-function triggerAlerts(activeAlerts) {
-    if (!activeAlerts) activeAlerts = [];
+function triggerAlerts(rawAlerts) {
+    if (!rawAlerts) rawAlerts = [];
+    const activeAlerts = (Array.isArray(rawAlerts) ? rawAlerts : [rawAlerts]).filter(a => a && a.deep_verified === true);
     const now = Date.now();
     const existingMap = new Map();
     alertHistory.forEach(a => existingMap.set(a.match_id || a.event_id || a.id, a));

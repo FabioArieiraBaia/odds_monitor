@@ -384,9 +384,10 @@ async def broadcast_loop():
             for alert in raw_alerts:
                 if alert.get("needs_deep_verification"):
                     asyncio.create_task(_run_deep_verification(alert))
-                verified_alerts.append(alert)
+                if alert.get("deep_verified") is True:
+                    verified_alerts.append(alert)
 
-            # Broadcast alerts to frontend
+            # Broadcast ONLY 100% verified alerts to frontend
             await manager.broadcast({
                 "type": "alerts",
                 "alerts": verified_alerts
