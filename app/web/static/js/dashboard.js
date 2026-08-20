@@ -744,6 +744,7 @@ function renderAlerts() {
                 </div>
                 <div class="alert-match-name" style="line-height:1.55; white-space:pre-line; font-size:13px;">
 🎯 ENTRADA PARA BET365
+⏱️ <b>Tempo de Atraso na Bet365:</b> <span style="color:#00ff88; font-weight:700;">${alert.delay_seconds ? alert.delay_seconds + 's' : '≥ 10.0s'}</span>
 ${leagueLine}${emoji} ${safeMatchName}
 
 Bet365 agora (Alvo): ${b365Now}

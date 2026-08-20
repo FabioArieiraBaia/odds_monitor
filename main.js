@@ -134,7 +134,7 @@ function createWindow() {
       try {
         const notif = new Notification({
           title: `⚡ ${alertData.priority || 'DIVERGÊNCIA'} — ${alertData.sport || 'Tênis de Mesa'}`,
-          body: `${alertData.match_name || 'Partida'}\nB365: ${alertData.bet365_score || '-'} vs Ref: ${alertData.betano_score || alertData.xbet_score || '-'}`,
+          body: `${alertData.match_name || 'Partida'}\n⏱️ Atraso Bet365: ${alertData.delay_seconds || '10'}s\nB365: ${alertData.bet365_score || '-'} vs Ref: ${alertData.betburger_score || alertData.xbet_score || '-'}`,
           silent: true,
           urgency: 'critical'
         });

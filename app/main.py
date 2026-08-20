@@ -440,8 +440,8 @@ async def format_and_send_telegram(alert: dict):
         if alert.get("novibet_score") and alert.get("novibet_score") != "não encontrado":
             msg_scores.append(f"🔵 <b>Novibet</b>: {alert.get('novibet_score')}")
 
-        delay_sec = alert.get("delay_seconds", 8.0)
-        delay_line = f"⏱️ <b>Tempo Travado na Bet365</b>: <b>{delay_sec:.1f}s</b>\n"
+        delay_sec = alert.get("delay_seconds", 10.0)
+        delay_line = f"⏱️ <b>Tempo de Atraso na Bet365</b>: <b>{delay_sec:.1f}s</b>\n"
 
         msg = (
             f"{title}\n"
