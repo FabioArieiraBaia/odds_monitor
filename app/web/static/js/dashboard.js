@@ -747,7 +747,7 @@ function renderAlerts() {
 ⏱️ <b>Tempo de Atraso na Bet365:</b> <span style="color:#00ff88; font-weight:700;">${alert.delay_seconds ? alert.delay_seconds + 's' : '≥ 10.0s'}</span>
 ${leagueLine}${emoji} ${safeMatchName}
 
-Bet365 agora (Alvo): ${b365Now}
+Bet365 agora (Alvo): ${b365Now} <span style="color:#ffd700; font-weight:700;">(travado há ${alert.delay_seconds ? alert.delay_seconds + 's' : '10s'})</span>
 BetBurger agora: ${burgerNow}
 1xBet agora: ${xbetNow}
 Betano agora: ${betanoNow}

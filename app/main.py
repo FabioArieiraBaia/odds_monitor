@@ -431,8 +431,11 @@ async def format_and_send_telegram(alert: dict):
             f"\n🔺 À frente da casa alvo: {', '.join(leading)}"
             if leading else ""
         )
+        delay_sec = alert.get("delay_seconds", 10.0)
+        delay_tag = f" <b>(travado há {delay_sec:.1f}s)</b>" if delay_sec else ""
+
         msg_scores = [
-            f"🎯 <b>Bet365 (Alvo)</b>: {alert.get('bet365_score', 'não encontrado')}",
+            f"🎯 <b>Bet365 (Alvo)</b>: {alert.get('bet365_score', 'não encontrado')}{delay_tag}",
             f"🍔 <b>BetBurger</b>: {alert.get('betburger_score', 'não encontrado')}",
             f"⚡ <b>1xBet</b>: {alert.get('xbet_score', 'não encontrado')}",
             f"🟠 <b>Betano</b>: {alert.get('betano_score', 'não encontrado')}",
@@ -440,7 +443,6 @@ async def format_and_send_telegram(alert: dict):
         if alert.get("novibet_score") and alert.get("novibet_score") != "não encontrado":
             msg_scores.append(f"🔵 <b>Novibet</b>: {alert.get('novibet_score')}")
 
-        delay_sec = alert.get("delay_seconds", 10.0)
         delay_line = f"⏱️ <b>Tempo de Atraso na Bet365</b>: <b>{delay_sec:.1f}s</b>\n"
 
         msg = (
