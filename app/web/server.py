@@ -90,7 +90,7 @@ class ScrapersConfigRequest(BaseModel):
     enable_bet365: bool
     enable_betburger: bool
     enable_betano: bool
-    freeze_threshold_seconds: float = Field(default=5.0, ge=1.0, le=60.0)
+    freeze_threshold_seconds: float = Field(default=8.0, ge=1.0, le=60.0)
 
 
 @app.get("/api/config")
