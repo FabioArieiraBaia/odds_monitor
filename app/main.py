@@ -422,7 +422,9 @@ async def _run_deep_verification(alert: dict):
         return
 
     delay_sec = alert.get("delay_seconds", 10.0)
-    logger.info(f"🔍 [DEEP VERIFIER] Abrindo nova página aos {delay_sec:.1f}s para validar travamento real de {alert['match_name']}...")
+    logger.info(f"🔍 [DEEP VERIFIER] Validando placar real para {alert['match_name']} ({delay_sec:.1f}s)...")
+
+    from web.server import manager
 
     try:
         is_still_frozen = await bet365_scraper.verify_match_deep(b365_url, b365_ev, burger_ev)

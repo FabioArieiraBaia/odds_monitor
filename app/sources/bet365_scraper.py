@@ -712,47 +712,66 @@ class Bet365Scraper(BaseSource):
 
     async def verify_match_deep(self, url: str, b365_event, burger_event) -> bool:
         """
-        Navigates to the match details page and checks if the real score is updated.
+        Targeted Deep Verification:
+        Locates the specific match on Bet365 by player tokens directly on the live page,
+        extracts the exact fixture's score rows, and validates if Bet365 is genuinely frozen.
         Returns True if the match is STILL frozen (True divergence).
-        Returns False if the match is actually updated (Fake divergence).
+        Returns False if the match has updated or is not found (Fake divergence).
         """
-        if not self.context:
+        if not self.page or not self._is_running:
             return True
-            
-        logger.info(f"[DeepVerifier] Checking real score for {b365_event.match_name} at {url}")
-        page = await self.context.new_page()
+
+        match_name = b365_event.match_name if b365_event else ""
+        logger.info(f"[DeepVerifier] Verifying real scoreboard for '{match_name}'...")
+
+        cleaned = re.sub(r"\s+v(?:s)?\.?\s+|\s+x\s+", " ", match_name, flags=re.I)
+        tokens = [t.lower() for t in re.split(r"\s+", cleaned) if len(t) >= 3]
+        if not tokens:
+            tokens = [t.lower() for t in match_name.split() if len(t) >= 2]
+
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=12000)
-            await asyncio.sleep(2) # Wait for scoreboard to render
-            
-            # Extract structured scoreboard columns and rows from match details page
-            data = await page.evaluate("""
-                () => {
-                    const scoreboard = document.querySelector('.ml1-ScoreHeader, .ml1-DetailedScoreboard, [class*="ScoreHeader"], [class*="Scoreboard"]');
-                    const rows = scoreboard ? Array.from(scoreboard.querySelectorAll('[class*="TeamRow"], [class*="Row"]')) : [];
-                    
+            data = await self.page.evaluate("""
+                (tokens) => {
+                    const fixtures = Array.from(document.querySelectorAll('.ovm-Fixture, [class*="Fixture"][class*="ovm"], .ipe-EventViewDetail'));
+                    let bestFixture = null;
+                    let bestScore = 0;
+
+                    for (const f of fixtures) {
+                        const text = (f.innerText || '').toLowerCase();
+                        let score = 0;
+                        for (const tok of tokens) {
+                            if (text.includes(tok)) score++;
+                        }
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestFixture = f;
+                        }
+                    }
+
+                    if (!bestFixture || bestScore < Math.max(1, Math.min(2, Math.floor(tokens.length / 2)))) {
+                        return { found: false };
+                    }
+
+                    // Extract score rows specifically from this matched fixture
+                    const participantRows = Array.from(bestFixture.querySelectorAll(
+                        '.ovm-FixtureNormalDetails, [class*="ParticipantDetails"], .ovm-Participant, [class*="ParticipantRow"]'
+                    ));
+
                     let p1Scores = [];
                     let p2Scores = [];
-                    
-                    if (rows.length >= 2) {
-                        const p1Cells = rows[0].querySelectorAll('[class*="Score"], [class*="Cell"], [class*="Point"], [class*="Pill"]');
-                        const p2Cells = rows[1].querySelectorAll('[class*="Score"], [class*="Cell"], [class*="Point"], [class*="Pill"]');
-                        
-                        p1Scores = Array.from(p1Cells)
-                            .map(c => c.textContent.trim())
-                            .filter(t => /^\\d+$/.test(t) || /^[Aa]d?v?$/.test(t));
-                            
-                        p2Scores = Array.from(p2Cells)
-                            .map(c => c.textContent.trim())
-                            .filter(t => /^\\d+$/.test(t) || /^[Aa]d?v?$/.test(t));
+
+                    if (participantRows.length >= 2) {
+                        const p1Cells = participantRows[0].querySelectorAll('[class*="Score"], [class*="Cell"], [class*="Point"], [class*="Pill"]');
+                        const p2Cells = participantRows[1].querySelectorAll('[class*="Score"], [class*="Cell"], [class*="Point"], [class*="Pill"]');
+
+                        p1Scores = Array.from(p1Cells).map(c => c.textContent.trim()).filter(t => /^\\d+$/.test(t) || /^[Aa]d?v?$/.test(t));
+                        p2Scores = Array.from(p2Cells).map(c => c.textContent.trim()).filter(t => /^\\d+$/.test(t) || /^[Aa]d?v?$/.test(t));
                     }
-                    
-                    // Fallback to all score pills on page if structured rows not found
+
+                    // Fallback to score elements inside this specific fixture
                     let flatScores = [];
                     if (p1Scores.length === 0 && p2Scores.length === 0) {
-                        const scoreEls = document.querySelectorAll(
-                            '[class*="Score"], [class*="score"], .ovm-ScoreWrapper_Score'
-                        );
+                        const scoreEls = bestFixture.querySelectorAll('[class*="Score"], [class*="score"], .ovm-ScoreWrapper_Score');
                         for (const el of scoreEls) {
                             if (el.children.length > 0) continue;
                             const t = el.textContent.trim();
@@ -761,44 +780,51 @@ class Bet365Scraper(BaseSource):
                             }
                         }
                     }
-                    
-                    return { p1: p1Scores, p2: p2Scores, flat: flatScores };
+
+                    return {
+                        found: true,
+                        p1: p1Scores,
+                        p2: p2Scores,
+                        flat: flatScores,
+                        matched_score: bestScore
+                    };
                 }
-            """)
-            
+            """, tokens)
+
+            if not data or not data.get("found"):
+                logger.warning(f"[DeepVerifier] Partida '{match_name}' não encontrada com precisão no DOM (tokens={tokens}).")
+                return False
+
             p1 = data.get('p1', [])
             p2 = data.get('p2', [])
             flat = data.get('flat', [])
-            
+
             internal_set, internal_game, internal_point = self._parse_scores_structured(
-                p1, p2, flat, b365_event.sport
+                p1, p2, flat, getattr(b365_event, "sport", "tabletennis")
             )
-            
-            # Check if BetBurger is still ahead of the internal Bet365 score
+
             burger_still_ahead = self._is_burger_ahead(
                 internal_set, internal_game,
                 burger_event.set_score, burger_event.game_score,
                 internal_point, burger_event.point_score
             )
-            
+
             if burger_still_ahead:
                 logger.info(
-                    f"[DeepVerifier] Verified: BetBurger {burger_event.set_score} ({burger_event.game_score}) Pts: {burger_event.point_score} "
-                    f"is still ahead of internal Bet365 score {internal_set} ({internal_game}) Pts: {internal_point}. True divergence!"
+                    f"[DeepVerifier] ✅ Travamento REAL CONFIRMADO: BetBurger {burger_event.set_score} ({burger_event.game_score}) "
+                    f"está à frente do placar da Bet365 {internal_set} ({internal_game}) para '{match_name}'."
                 )
                 return True
             else:
                 logger.info(
-                    f"[DeepVerifier] Discarded: Internal Bet365 score {internal_set} ({internal_game}) Pts: {internal_point} "
-                    f"has caught up or is ahead of BetBurger {burger_event.set_score} ({burger_event.game_score}). Fake divergence."
+                    f"[DeepVerifier] ❌ Falso Positivo Descartado: Placar real da Bet365 {internal_set} ({internal_game}) "
+                    f"já alcançou ou superou o BetBurger {burger_event.set_score} ({burger_event.game_score}) para '{match_name}'."
                 )
                 return False
-                
+
         except Exception as e:
-            logger.warning(f"[DeepVerifier] Failed to verify {url}: {e}")
-            return True # If verification fails, assume it's a true divergence to be safe
-        finally:
-            await page.close()
+            logger.warning(f"[DeepVerifier] Erro ao verificar '{match_name}': {e}")
+            return False
 
     def _parse_score_pair(self, score: str) -> tuple:
         """Parse 'H:A' into (home, away) ints. Returns (0,0) on failure."""
