@@ -11,6 +11,7 @@ Gerar_Instalador_Final.bat
 .git/index.lock
 *.html
 *.png
+!assets/*.png
 *.txt
 venv/
 app/venv/
