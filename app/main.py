@@ -207,7 +207,7 @@ async def bet365_loop():
         except Exception as e:
             logger.error(f"[Loop] Bet365 scraper loop error: {e}")
         
-        await asyncio.sleep(0.8)
+        await asyncio.sleep(0.5)
 
 
 async def onexbet_loop():
@@ -537,19 +537,27 @@ def on_score_changed_reactive(match_id: str, source: str, event, old_ev):
     """
     Ultra-low latency reactive callback (< 50µs):
     Triggers immediate divergence evaluation on the affected match without waiting for the 1s loop.
+    Dispatches deep verification when needed and broadcasts ONLY verified alerts to UI.
     """
     from web.server import manager
     alerts = detector.evaluate_match_reactive(match_id)
     if alerts:
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(manager.broadcast({
-                "type": "alerts",
-                "alerts": alerts
-            }))
             for a in alerts:
-                if a.get("notify"):
-                    loop.create_task(format_and_send_telegram(a))
+                if a.get("needs_deep_verification"):
+                    loop.create_task(_run_deep_verification(a))
+
+            # Broadcast ONLY verified alerts to UI & Telegram
+            verified = [a for a in alerts if a.get("deep_verified") is True]
+            if verified:
+                loop.create_task(manager.broadcast({
+                    "type": "alerts",
+                    "alerts": verified
+                }))
+                for a in verified:
+                    if a.get("notify"):
+                        loop.create_task(format_and_send_telegram(a))
         except RuntimeError:
             pass
 

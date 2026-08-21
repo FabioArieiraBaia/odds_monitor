@@ -105,6 +105,7 @@ class Bet365Scraper(BaseSource):
                 options.add_argument("--disable-renderer-backgrounding")
                 options.add_argument("--disable-backgrounding-occluded-windows")
                 options.add_argument("--disable-ipc-flooding-protection")
+                options.add_argument("--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,ThrottleDisplayNoneAndVisibilityHiddenCrossOriginIframes")
                 options.add_argument("--blink-settings=imagesEnabled=false")
                 options.add_argument("--mute-audio")
                 
@@ -162,6 +163,10 @@ class Bet365Scraper(BaseSource):
                 try:
                     cdp = await self.context.new_cdp_session(self.page)
                     await cdp.send("Network.enable")
+                    try:
+                        await cdp.send("Emulation.setFocusEmulationEnabled", {"enabled": True})
+                    except Exception:
+                        pass
                     # Block heavy bandwidth video streams, fonts, images and trackers
                     await cdp.send("Network.setBlockedURLs", {
                         "urls": [
@@ -744,30 +749,8 @@ class Bet365Scraper(BaseSource):
 
         try:
             data = await self.page.evaluate("""
-                (tokens) => {
-                    const fixtures = Array.from(document.querySelectorAll('.ovm-Fixture, [class*="Fixture"][class*="ovm"], .ipe-EventViewDetail'));
-                    let bestFixture = null;
-                    let bestScore = 0;
-
-                    for (const f of fixtures) {
-                        const text = (f.innerText || '').toLowerCase();
-                        let score = 0;
-                        for (const tok of tokens) {
-                            if (text.includes(tok)) score++;
-                        }
-                        if (score > bestScore) {
-                            bestScore = score;
-                            bestFixture = f;
-                        }
-                    }
-
-                    // Require at least 60% of tokens to match
-                    const minRequired = Math.max(2, Math.ceil(tokens.length * 0.6));
-                    if (!bestFixture || bestScore < minRequired) {
-                        return { found: false, reason: 'low_token_match', bestScore: bestScore, required: minRequired };
-                    }
-
-                    // ── Extract player names from the matched fixture for identity validation ──
+                async (tokens) => {
+                    const minRequired = Math.max(2, Math.ceil(tokens.length * 0.5));
                     const nameSelectors = [
                         '.ovm-FixtureName_Name',
                         '[class*="ParticipantName"]',
@@ -775,6 +758,53 @@ class Bet365Scraper(BaseSource):
                         '[class*="FixtureDetailsTwoWay_TeamName"]',
                         '[class*="Fixture"] [class*="Name"]',
                     ];
+
+                    function findMatch() {
+                        const fixtures = Array.from(document.querySelectorAll('.ovm-Fixture, [class*="Fixture"][class*="ovm"], .ipe-EventViewDetail'));
+                        for (const f of fixtures) {
+                            const text = (f.innerText || '').toLowerCase();
+                            let score = 0;
+                            for (const tok of tokens) {
+                                if (text.includes(tok)) score++;
+                            }
+                            if (score >= minRequired) {
+                                return { fixture: f, score: score };
+                            }
+                        }
+                        return null;
+                    }
+
+                    let match = findMatch();
+
+                    // If not found in initial view, progressively scroll to search Bet365's virtual scroll DOM
+                    if (!match) {
+                        window.scrollTo(0, 0);
+                        await new Promise(r => setTimeout(r, 60));
+                        match = findMatch();
+                    }
+
+                    if (!match) {
+                        for (let step = 0; step < 8; step++) {
+                            window.scrollBy(0, 400);
+                            await new Promise(r => setTimeout(r, 80));
+                            match = findMatch();
+                            if (match) break;
+                        }
+                    }
+
+                    if (!match || !match.fixture) {
+                        return { found: false, reason: 'not_in_dom' };
+                    }
+
+                    const bestFixture = match.fixture;
+
+                    // Bring the fixture into center viewport so Bet365 DOM renders full score pills
+                    try {
+                        bestFixture.scrollIntoView({ block: 'center', behavior: 'instant' });
+                        await new Promise(r => setTimeout(r, 60));
+                    } catch (e) {}
+
+                    // ── Extract player names from the matched fixture for identity validation ──
                     let matchedNames = [];
                     for (const nSel of nameSelectors) {
                         const nameEls = Array.from(bestFixture.querySelectorAll(nSel));
@@ -787,11 +817,6 @@ class Bet365Scraper(BaseSource):
                             break;
                         }
                     }
-
-                    // Bring the fixture into center viewport so Bet365 DOM renders full score pills
-                    try {
-                        bestFixture.scrollIntoView({ block: 'center', behavior: 'instant' });
-                    } catch (e) {}
 
                     // Extract score rows specifically from this matched fixture
                     const participantRows = Array.from(bestFixture.querySelectorAll(
@@ -830,7 +855,7 @@ class Bet365Scraper(BaseSource):
                         p2: p2Scores,
                         flat: flatScores,
                         matched_names: matchedNames,
-                        matched_score: bestScore
+                        matched_score: match.score
                     };
                 }
             """, tokens)

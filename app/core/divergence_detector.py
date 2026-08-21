@@ -345,7 +345,9 @@ class PointEventTracker:
             point_gap = c_points - b_points
 
             # Valid point divergence: consensus strictly ahead by 2+ points (1 point = normal latency)
-            is_ahead = (point_gap >= 2) and (c_gh >= b_gh) and (c_ga >= b_ga)
+            # Also reject Set-Break boundary where Bet365 already finished/reset to 0:0 and consensus is at 8+ points
+            is_set_break_reset = (b_points == 0 and c_points >= 8) or (max(c_gh, c_ga) >= 11 and b_points == 0)
+            is_ahead = (point_gap >= 2) and (c_gh >= b_gh) and (c_ga >= b_ga) and not is_set_break_reset
 
             active_event = self._active_events.get(match_id)
             ref_event = b365_ev or betano_ev or onexbet_ev or burger_ev or novibet_ev
